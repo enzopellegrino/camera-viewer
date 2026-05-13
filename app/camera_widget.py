@@ -188,12 +188,23 @@ class CameraWidget(QWidget):
             self.clicked.emit(self)
         super().mousePressEvent(event)
 
-    def stop(self):
+    def request_stop(self):
+        """Signal the thread to stop without blocking. Call wait_stop() after."""
         self._render_timer.stop()
         self._reconnect_timer.stop()
         if self._thread and self._thread.isRunning():
-            self._thread.stop()
-        self._thread = None
+            with QMutexLocker(self._thread._mutex):
+                self._thread._running = False
+
+    def wait_stop(self):
+        """Wait for the thread to finish after request_stop()."""
+        if self._thread:
+            self._thread.wait(3000)
+            self._thread = None
+
+    def stop(self):
+        self.request_stop()
+        self.wait_stop()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

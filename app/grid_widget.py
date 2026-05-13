@@ -111,11 +111,17 @@ class GridWidget(QWidget):
 
     def stop_all(self):
         for w in self._widgets:
-            w.stop()
+            w.request_stop()
+        for w in self._widgets:
+            w.wait_stop()
 
     def _clear(self):
+        # Signal all threads to stop simultaneously
         for w in self._widgets:
-            w.stop()
+            w.request_stop()
+        # Then wait for all of them together
+        for w in self._widgets:
+            w.wait_stop()
             w.setParent(None)
             w.deleteLater()
         self._widgets.clear()
