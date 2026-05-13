@@ -4,8 +4,7 @@ from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMutex, QMutexLocker
 from PySide6.QtGui import QImage, QPixmap, QPainter, QCursor
 
-TARGET_FPS = 25
-_FRAME_INTERVAL_MS = 1000 // TARGET_FPS
+_DEFAULT_FPS = 30
 
 
 # ─── Widget video con paintEvent ─────────────────────────────────────────────
@@ -95,6 +94,7 @@ class CameraWidget(QWidget):
         camera_config: dict,
         reconnect_delay_ms: int = 5000,
         startup_delay_ms: int = 0,
+        render_fps: int = _DEFAULT_FPS,
         parent=None,
     ):
         super().__init__(parent)
@@ -137,7 +137,7 @@ class CameraWidget(QWidget):
 
         # UI refresh timer — pulls latest frame at TARGET_FPS, drops the rest
         self._render_timer = QTimer(self)
-        self._render_timer.setInterval(_FRAME_INTERVAL_MS)
+        self._render_timer.setInterval(1000 // max(1, render_fps))
         self._render_timer.timeout.connect(self._pull_frame)
 
     def showEvent(self, event):

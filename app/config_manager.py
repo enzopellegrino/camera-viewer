@@ -89,6 +89,7 @@ class ConfigManager:
             "settings": {
                 "kiosk_mode": False,
                 "reconnect_delay_ms": 5000,
+                "render_fps": 30,
                 "default_screen": 0,
             },
             "users": [{

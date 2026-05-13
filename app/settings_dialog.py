@@ -222,6 +222,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_cameras_tab(), "Telecamere")
         tabs.addTab(self._build_screens_tab(), "Schermate")
         tabs.addTab(self._build_users_tab(), "Utenti")
+        tabs.addTab(self._build_general_tab(), "Generali")
         root.addWidget(tabs)
 
         footer = QWidget()
@@ -451,9 +452,38 @@ class SettingsDialog(QDialog):
         self.config.users.pop(row)
         self._refresh_users()
 
+    # ── General tab ──────────────────────────────────────────────────────
+
+    def _build_general_tab(self) -> QWidget:
+        w = QWidget()
+        form = QFormLayout(w)
+        form.setContentsMargins(16, 16, 16, 8)
+        form.setSpacing(12)
+
+        self._fps_combo = QComboBox()
+        for fps in [10, 15, 20, 25, 30]:
+            self._fps_combo.addItem(f"{fps} fps", fps)
+        current_fps = self.config.settings.get("render_fps", 30)
+        idx = self._fps_combo.findData(current_fps)
+        self._fps_combo.setCurrentIndex(max(idx, 0))
+        form.addRow("Fluidità video:", self._fps_combo)
+
+        self._reconnect_ms = QLineEdit(str(self.config.settings.get("reconnect_delay_ms", 5000)))
+        self._reconnect_ms.setPlaceholderText("5000")
+        form.addRow("Ritardo riconnessione (ms):", self._reconnect_ms)
+
+        return w
+
     # ── Save ─────────────────────────────────────────────────────────────
 
     def _save(self):
+        self.config.settings["render_fps"] = self._fps_combo.currentData()
+        try:
+            ms = int(self._reconnect_ms.text())
+            if ms > 0:
+                self.config.settings["reconnect_delay_ms"] = ms
+        except ValueError:
+            pass
         self.config.save()
         self.saved.emit()
         self.accept()

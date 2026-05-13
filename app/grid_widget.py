@@ -32,9 +32,10 @@ def resolve_layout(layout_str: str, n_cameras: int) -> tuple[int, int]:
 class GridWidget(QWidget):
     camera_clicked = Signal(object)  # CameraWidget
 
-    def __init__(self, reconnect_delay_ms: int = 5000, parent=None):
+    def __init__(self, reconnect_delay_ms: int = 5000, render_fps: int = 30, parent=None):
         super().__init__(parent)
         self.reconnect_delay_ms = reconnect_delay_ms
+        self.render_fps = render_fps
         self.setStyleSheet("background-color: #000000;")
         self._grid = QGridLayout(self)
         self._grid.setSpacing(2)
@@ -65,7 +66,7 @@ class GridWidget(QWidget):
                 self._grid.setColumnStretch(col, 1)
                 cfg = camera_lookup.get(camera_ids[idx]) if idx < len(camera_ids) else {}
                 startup_delay = idx * 500
-                widget = CameraWidget(cfg or {}, self.reconnect_delay_ms, startup_delay, self)
+                widget = CameraWidget(cfg or {}, self.reconnect_delay_ms, startup_delay, self.render_fps, self)
                 widget.clicked.connect(self.camera_clicked)
                 self._grid.addWidget(widget, row, col)
                 self._widgets.append(widget)

@@ -65,7 +65,10 @@ class MainWindow(QMainWindow):
         self._toolbar = self._build_toolbar()
         self._root_vbox.addWidget(self._toolbar)
 
-        self._grid = GridWidget(self.config.settings.get("reconnect_delay_ms", 5000))
+        self._grid = GridWidget(
+            self.config.settings.get("reconnect_delay_ms", 5000),
+            self.config.settings.get("render_fps", 30),
+        )
         self._grid.camera_clicked.connect(self._on_camera_clicked)
         self._root_vbox.addWidget(self._grid, 1)
 
