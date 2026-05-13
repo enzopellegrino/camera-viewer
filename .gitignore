@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# PyInstaller
+build/
+dist/
+
+# Keys — NEVER commit the private key
+license_private.pem
+
+# macOS
+.DS_Store
+
+# Config locale (contiene URL e credenziali telecamere)
+config.json
