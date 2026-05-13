@@ -4,6 +4,9 @@ from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMutex, QMutexLocker
 from PySide6.QtGui import QImage, QPixmap, QPainter, QCursor
 
+TARGET_FPS = 15
+_FRAME_INTERVAL_MS = 1000 // TARGET_FPS
+
 
 # ─── Widget video con paintEvent ─────────────────────────────────────────────
 
@@ -39,6 +42,9 @@ class _StreamThread(QThread):
         self._url = url
         self._running = False
         self._mutex = QMutex()
+        # Latest decoded frame, shared between capture loop and emit timer
+        self._frame_mutex = QMutex()
+        self._pending_frame: QImage | None = None
 
     def run(self):
         self._running = True
@@ -61,9 +67,17 @@ class _StreamThread(QThread):
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             h, w, ch = rgb.shape
             img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
-            self.frame_ready.emit(img)
+            # Overwrite pending frame — older frames are dropped if UI hasn't consumed them yet
+            with QMutexLocker(self._frame_mutex):
+                self._pending_frame = img
 
         cap.release()
+
+    def take_frame(self) -> QImage | None:
+        with QMutexLocker(self._frame_mutex):
+            frame = self._pending_frame
+            self._pending_frame = None
+            return frame
 
     def stop(self):
         with QMutexLocker(self._mutex):
@@ -121,6 +135,11 @@ class CameraWidget(QWidget):
         self._reconnect_timer.setInterval(reconnect_delay_ms)
         self._reconnect_timer.timeout.connect(self._start_stream)
 
+        # UI refresh timer — pulls latest frame at TARGET_FPS, drops the rest
+        self._render_timer = QTimer(self)
+        self._render_timer.setInterval(_FRAME_INTERVAL_MS)
+        self._render_timer.timeout.connect(self._pull_frame)
+
     def showEvent(self, event):
         super().showEvent(event)
         if not self._started:
@@ -140,15 +159,19 @@ class CameraWidget(QWidget):
         self._status_label.show()
         self._status_label.setGeometry(0, 0, self.width(), self.height())
         self._thread = _StreamThread(url, self)
-        self._thread.frame_ready.connect(self._on_frame)
         self._thread.error.connect(self._on_error)
         self._thread.finished.connect(self._on_thread_finished)
         self._thread.start()
+        self._render_timer.start()
 
-    def _on_frame(self, img: QImage):
-        if self._status_label.isVisible():
-            self._status_label.hide()
-        self._video.set_frame(img)
+    def _pull_frame(self):
+        if self._thread is None:
+            return
+        img = self._thread.take_frame()
+        if img is not None:
+            if self._status_label.isVisible():
+                self._status_label.hide()
+            self._video.set_frame(img)
 
     def _on_error(self, message: str):
         self._status_label.setText(f"{message} — riconnessione...")
@@ -156,6 +179,7 @@ class CameraWidget(QWidget):
         self._status_label.setGeometry(0, 0, self.width(), self.height())
 
     def _on_thread_finished(self):
+        self._render_timer.stop()
         if not self._reconnect_timer.isActive():
             self._reconnect_timer.start()
 
@@ -165,6 +189,7 @@ class CameraWidget(QWidget):
         super().mousePressEvent(event)
 
     def stop(self):
+        self._render_timer.stop()
         self._reconnect_timer.stop()
         if self._thread and self._thread.isRunning():
             self._thread.stop()
