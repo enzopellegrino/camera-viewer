@@ -2,6 +2,7 @@ import sys
 import os
 import signal
 import atexit
+import tempfile
 from pathlib import Path
 
 os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
@@ -13,7 +14,7 @@ from app.main_window import MainWindow
 from app.license_manager import check_license, LicenseStatus
 from app.license_dialog import LicenseDialog
 
-_PID_FILE = Path("/tmp/camera-viewer.pid")
+_PID_FILE = Path(tempfile.gettempdir()) / "camera-viewer.pid"
 
 
 def _kill_existing():
