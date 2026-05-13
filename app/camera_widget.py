@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMutex, QMutexLocker
 from PySide6.QtGui import QImage, QPixmap, QPainter, QCursor
 
-TARGET_FPS = 15
+TARGET_FPS = 25
 _FRAME_INTERVAL_MS = 1000 // TARGET_FPS
 
 
