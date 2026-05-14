@@ -24,6 +24,7 @@ Name: "desktopicon"; Description: "Crea un'icona sul Desktop"; GroupDescription:
 
 [Files]
 Source: "dist\Camera Viewer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 Name: "{group}\Camera Viewer"; Filename: "{app}\Camera Viewer.exe"
@@ -31,6 +32,7 @@ Name: "{group}\Disinstalla Camera Viewer"; Filename: "{uninstallexe}"
 Name: "{commondesktop}\Camera Viewer"; Filename: "{app}\Camera Viewer.exe"; Tasks: desktopicon
 
 [Run]
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installazione prerequisiti Visual C++..."; Flags: waituntilterminated
 Filename: "{app}\Camera Viewer.exe"; Description: "Avvia Camera Viewer"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
