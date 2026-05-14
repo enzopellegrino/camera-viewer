@@ -20,7 +20,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Name: "italian"; MessagesFile: "compiler:Languages\Italian.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "Crea un'icona sul {cm:DesktopName}"; GroupDescription: "Icone aggiuntive:"; Flags: checked
+Name: "desktopicon"; Description: "Crea un'icona sul Desktop"; GroupDescription: "Icone aggiuntive:"
 
 [Files]
 Source: "dist\Camera Viewer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
