@@ -27,7 +27,7 @@ jobs:
 
       - name: Build EXE
         run: |
-          pyinstaller camera_viewer_windows.spec --noconfirm --contents-directory .
+          pyinstaller camera_viewer_windows.spec --noconfirm
 
       - name: Download VC++ Redistributable
         run: |
