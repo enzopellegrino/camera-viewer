@@ -50,5 +50,4 @@ coll = COLLECT(
     strip=False,
     upx=False,
     name="Camera Viewer",
-    contents_directory=".",
 )
