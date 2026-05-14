@@ -1,18 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
-pyside6_datas, pyside6_binaries, pyside6_hiddenimports = collect_all('PySide6')
-
-datas = [("app/icon_128.png", "app")] + pyside6_datas
+datas = [("app/icon_128.png", "app")]
 
 a = Analysis(
     ["main.py"],
     pathex=["."],
-    binaries=pyside6_binaries,
+    binaries=[],
     datas=datas,
-    hiddenimports=pyside6_hiddenimports + [
+    hiddenimports=[
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
         "cv2",
         "cryptography",
     ],
