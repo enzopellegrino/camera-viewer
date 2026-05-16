@@ -25,7 +25,7 @@ def _kill_existing():
         if pid != os.getpid():
             os.kill(pid, signal.SIGTERM)
             import time; time.sleep(0.5)
-    except (ProcessLookupError, ValueError, PermissionError):
+    except (ProcessLookupError, ValueError, PermissionError, OSError):
         pass
     _PID_FILE.unlink(missing_ok=True)
 
