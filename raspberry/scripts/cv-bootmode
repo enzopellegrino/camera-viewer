@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""cv-bootmode — decide and apply the boot mode at startup.
+
+Runs as root from camera-bootmode.service after NetworkManager is up.
+
+  PROVISIONING  (no cameras configured, OR a force-setup flag is present):
+      - bring up the Access Point + captive portal
+      - make sure the viewer is not running
+
+  OPERATIONAL   (cameras configured and no force-setup flag):
+      - tear down the Access Point
+      - let NetworkManager auto-connect ethernet/WiFi
+      - start the viewer (kiosk)
+
+The web config server (port 80) runs independently in both modes, so the
+device can always be reconfigured.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from pathlib import Path
+
+CONFIG = Path(os.environ.get(
+    "CAMERA_VIEWER_CONFIG", "/home/pi/.config/camera-viewer/config.json"))
+FORCE_SETUP = CONFIG.parent / "force-setup"
+
+
+def should_provision() -> bool:
+    if FORCE_SETUP.exists():
+        return True
+    try:
+        cfg = json.loads(CONFIG.read_text())
+    except (OSError, ValueError):
+        return True
+    return len(cfg.get("cameras", [])) == 0
+
+
+def run(*args: str) -> None:
+    subprocess.run(list(args), check=False)
+
+
+def main() -> None:
+    if should_provision():
+        run("/usr/local/sbin/cv-ap", "start")
+        run("systemctl", "stop", "camera-viewer.service")
+        print("MODE=provisioning")
+    else:
+        run("/usr/local/sbin/cv-ap", "stop")
+        run("systemctl", "start", "camera-viewer.service")
+        print("MODE=operational")
+
+
+if __name__ == "__main__":
+    main()

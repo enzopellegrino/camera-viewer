@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>Camera Viewer — Configurazione</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>Camera Viewer</h1>
+    <div id="status" class="status status--off">
+      <span class="dot"></span><span id="status-text">Stato rete…</span>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab is-active" data-tab="network">Rete</button>
+    <button class="tab" data-tab="cameras">Telecamere</button>
+    <button class="tab" data-tab="vpn">VPN</button>
+    <button class="tab" data-tab="settings">Impostazioni</button>
+  </nav>
+
+  <main>
+    <!-- ── RETE ───────────────────────────────────────────────── -->
+    <section id="tab-network" class="panel is-active">
+      <h2>Connessione a Internet</h2>
+      <p class="hint">Scegli come il Raspberry si collega alla rete.</p>
+
+      <div class="seg">
+        <button id="mode-eth" class="seg__btn is-active">Ethernet (cavo)</button>
+        <button id="mode-wifi" class="seg__btn">WiFi</button>
+      </div>
+
+      <div id="eth-box" class="box">
+        <p>Collega il cavo di rete: la connessione è automatica (DHCP).</p>
+      </div>
+
+      <div id="wifi-box" class="box" hidden>
+        <div class="row">
+          <button id="scan-btn" class="btn">🔄 Cerca reti WiFi</button>
+        </div>
+        <ul id="wifi-list" class="wifi-list"></ul>
+        <div id="wifi-connect" class="wifi-connect" hidden>
+          <label>Rete: <strong id="wifi-ssid"></strong></label>
+          <input id="wifi-pass" type="password" placeholder="Password WiFi" />
+          <div class="row">
+            <button id="wifi-connect-btn" class="btn btn--primary">Connetti</button>
+            <button id="wifi-cancel-btn" class="btn">Annulla</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── TELECAMERE ─────────────────────────────────────────── -->
+    <section id="tab-cameras" class="panel">
+      <h2>Telecamere</h2>
+      <p class="hint">Aggiungi le telecamere RTSP da mostrare sul monitor.</p>
+
+      <ul id="cam-list" class="cam-list"></ul>
+
+      <button id="cam-add" class="btn btn--primary btn--block">+ Aggiungi telecamera</button>
+
+      <div id="cam-form" class="box" hidden>
+        <input type="hidden" id="cam-id" />
+        <label>Nome</label>
+        <input id="cam-name" type="text" placeholder="es. Ingresso principale" />
+        <label>URL RTSP</label>
+        <input id="cam-url" type="text" placeholder="rtsp://utente:password@192.168.1.x:554/stream" />
+        <div class="row">
+          <button id="cam-save" class="btn btn--primary">Salva</button>
+          <button id="cam-cancel" class="btn">Annulla</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── VPN ────────────────────────────────────────────────── -->
+    <section id="tab-vpn" class="panel">
+      <h2>VPN (WireGuard)</h2>
+      <p class="hint">Per le telecamere raggiungibili solo via VPN. Solo le subnet che indichi passano nel tunnel: la rete attuale non si perde (split-tunnel).</p>
+
+      <div id="vpn-state" class="box">
+        <div class="status status--off" id="vpn-status">
+          <span class="dot"></span><span id="vpn-status-text">VPN non configurata</span>
+        </div>
+        <div id="vpn-detail" class="vpn-detail" hidden></div>
+        <div class="row" id="vpn-actions" hidden>
+          <button id="vpn-disable" class="btn">Disattiva</button>
+          <button id="vpn-remove" class="btn icon-btn del" style="flex:0 0 auto">Rimuovi</button>
+        </div>
+      </div>
+
+      <label>Subnet / IP delle telecamere remote</label>
+      <input id="vpn-subnets" type="text" placeholder="es. 10.8.0.0/24, 10.8.1.50" />
+      <p class="hint">Separa con virgole. Solo questi indirizzi passeranno nel tunnel.</p>
+
+      <div class="seg">
+        <button id="vpn-mode-file" class="seg__btn is-active">Carica file .conf</button>
+        <button id="vpn-mode-manual" class="seg__btn">Inserimento manuale</button>
+      </div>
+
+      <div id="vpn-file-box" class="box">
+        <label>File di configurazione WireGuard (.conf)</label>
+        <input id="vpn-file" type="file" accept=".conf,text/plain" />
+        <p class="hint">L'AllowedIPs del file verrà sostituito con le subnet indicate sopra.</p>
+      </div>
+
+      <div id="vpn-manual-box" class="box" hidden>
+        <label>PrivateKey (Interface)</label>
+        <input id="vpn-private-key" type="text" placeholder="chiave privata" />
+        <label>Address (Interface)</label>
+        <input id="vpn-address" type="text" placeholder="es. 10.8.0.2/32" />
+        <label>Peer PublicKey</label>
+        <input id="vpn-public-key" type="text" placeholder="chiave pubblica del server" />
+        <label>PresharedKey (opzionale)</label>
+        <input id="vpn-psk" type="text" placeholder="se previsto" />
+        <label>Endpoint</label>
+        <input id="vpn-endpoint" type="text" placeholder="es. vpn.esempio.it:51820" />
+      </div>
+
+      <label class="row" style="align-items:center; gap:8px;">
+        <input type="checkbox" id="vpn-boot" checked style="width:auto" />
+        <span>Riconnetti automaticamente all'avvio</span>
+      </label>
+
+      <button id="vpn-apply" class="btn btn--primary btn--block">Attiva VPN</button>
+    </section>
+
+    <!-- ── IMPOSTAZIONI ───────────────────────────────────────── -->
+    <section id="tab-settings" class="panel">
+      <h2>Impostazioni viewer</h2>
+
+      <label>Disposizione griglia</label>
+      <select id="set-layout">
+        <option value="auto">Automatica</option>
+        <option value="1x1">1x1</option>
+        <option value="1x2">1x2</option>
+        <option value="2x1">2x1</option>
+        <option value="2x2">2x2</option>
+        <option value="3x2">3x2</option>
+        <option value="2x3">2x3</option>
+        <option value="3x3">3x3</option>
+        <option value="4x4">4x4</option>
+      </select>
+
+      <label>Fluidità video (FPS)</label>
+      <select id="set-fps">
+        <option value="10">10 fps</option>
+        <option value="15">15 fps</option>
+        <option value="20">20 fps</option>
+        <option value="25">25 fps</option>
+        <option value="30">30 fps</option>
+      </select>
+
+      <button id="set-save" class="btn btn--primary btn--block">Salva impostazioni</button>
+
+      <hr style="border:none; border-top:1px solid var(--border); margin:24px 0" />
+
+      <h2>Avvio</h2>
+      <p class="hint">Quando hai finito di configurare, avvia il viewer: il dispositivo si riavvia e mostra le telecamere sul monitor.</p>
+      <button id="apply-btn" class="btn btn--primary btn--block">✓ Salva e avvia il viewer</button>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

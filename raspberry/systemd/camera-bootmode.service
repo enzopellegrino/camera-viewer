@@ -1,0 +1,12 @@
+[Unit]
+Description=Camera Viewer - boot mode selector (provisioning vs operational)
+After=NetworkManager.service network-online.target camera-webconfig.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cv-bootmode
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
