@@ -149,6 +149,132 @@ def api_settings_set():
     return jsonify({"ok": True, "settings": store.get_settings(), "layout": store.get_layout()})
 
 
+@app.route("/api/restart-viewer", methods=["POST"])
+def api_restart_viewer():
+    """Kill the viewer and relaunch it with the correct display environment.
+
+    No sudo needed — viewer and Flask both run as user pi.
+    """
+    import signal as _signal
+    import time as _time
+
+    # Kill any running viewer instance
+    for proc in os.popen("pgrep -f 'python3 main.py'").read().split():
+        try:
+            os.kill(int(proc), _signal.SIGTERM)
+        except (ProcessLookupError, ValueError):
+            pass
+
+    _time.sleep(1)  # give it time to exit cleanly
+
+    # Relaunch via cv-viewer-launch which handles the operational mode check
+    env = os.environ.copy()
+    env.update({
+        "DISPLAY": ":0",
+        "WAYLAND_DISPLAY": "wayland-0",
+        "XDG_RUNTIME_DIR": "/run/user/1000",
+        "QT_QPA_PLATFORM": "xcb",
+        "CAMERA_VIEWER_CONFIG": str(store.config_path()),
+    })
+    subprocess.Popen(
+        ["/usr/local/sbin/cv-viewer-launch"],
+        env=env,
+        stdout=open("/tmp/viewer.log", "a"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    return jsonify({"ok": True, "message": "Viewer riavviato"})
+
+
+# ── API: Wallpaper ────────────────────────────────────────────────────────────
+
+_WALLPAPER_PATH = os.path.expanduser("~/.config/camera-viewer/wallpaper.jpg")
+_PCMANFM_CONF_GLOB = os.path.expanduser(
+    "~/.config/pcmanfm/default/desktop-items-*.conf"
+)
+_ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+
+
+def _set_pcmanfm_wallpaper(path: str) -> None:
+    """Update all pcmanfm desktop config files with the new wallpaper path."""
+    import glob as _glob, configparser as _cp
+
+    for conf_file in _glob.glob(_PCMANFM_CONF_GLOB):
+        cfg = _cp.RawConfigParser()
+        cfg.read(conf_file)
+        if not cfg.has_section("*"):
+            cfg.add_section("*")
+        cfg.set("*", "wallpaper", path)
+        cfg.set("*", "wallpaper_mode", "crop")
+        with open(conf_file, "w") as f:
+            cfg.write(f)
+
+    # Signal pcmanfm to reload (SIGHUP)
+    env = {
+        "WAYLAND_DISPLAY": "wayland-0",
+        "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
+        "HOME": os.path.expanduser("~"),
+    }
+    subprocess.run(
+        ["pcmanfm", "--set-wallpaper", path, "--wallpaper-mode=crop"],
+        env={**os.environ, **env},
+        timeout=5,
+        check=False,
+        capture_output=True,
+    )
+
+
+@app.route("/api/wallpaper", methods=["GET"])
+def api_wallpaper_get():
+    exists = os.path.exists(_WALLPAPER_PATH)
+    return jsonify({"ok": True, "custom": exists,
+                    "url": "/api/wallpaper/image" if exists else None})
+
+
+@app.route("/api/wallpaper/image", methods=["GET"])
+def api_wallpaper_image():
+    if not os.path.exists(_WALLPAPER_PATH):
+        return "", 404
+    return send_from_directory(
+        os.path.dirname(_WALLPAPER_PATH),
+        os.path.basename(_WALLPAPER_PATH),
+    )
+
+
+@app.route("/api/wallpaper", methods=["POST"])
+def api_wallpaper_set():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "message": "Nessun file ricevuto"}), 400
+
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        return jsonify({"ok": False,
+                        "message": "Formato non supportato (usa JPG, PNG, BMP, WEBP)"}), 400
+
+    os.makedirs(os.path.dirname(_WALLPAPER_PATH), exist_ok=True)
+    f.save(_WALLPAPER_PATH)
+
+    try:
+        _set_pcmanfm_wallpaper(_WALLPAPER_PATH)
+    except Exception as e:
+        return jsonify({"ok": False, "message": f"Salvataggio OK ma errore applicazione: {e}"}), 500
+
+    return jsonify({"ok": True, "message": "Sfondo aggiornato"})
+
+
+@app.route("/api/wallpaper", methods=["DELETE"])
+def api_wallpaper_delete():
+    default = "/usr/share/rpd-wallpaper/aurora.jpg"
+    if os.path.exists(_WALLPAPER_PATH):
+        os.remove(_WALLPAPER_PATH)
+    try:
+        _set_pcmanfm_wallpaper(default)
+    except Exception:
+        pass
+    return jsonify({"ok": True, "message": "Sfondo ripristinato"})
+
+
 # ── API: VPN (WireGuard split-tunnel) ────────────────────────────────────────
 
 def _parse_subnets(value) -> list[str]:

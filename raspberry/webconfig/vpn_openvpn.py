@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+from pathlib import Path
 import re
 import shutil
 import subprocess
@@ -175,7 +176,7 @@ def remove() -> tuple[bool, str]:
 def status() -> dict:
     """Status via the helper: active (systemd), tun IP, configured."""
     result = {"configured": False, "active": False, "tun_ip": None,
-              "routes": None}
+              "routes": None, "proto": None, "server": None}
     if not _helper_available():
         return result
     rc, out, _ = _run_helper("status")
@@ -192,4 +193,10 @@ def status() -> dict:
         elif line.startswith("routes="):
             v = line.split("=", 1)[1].strip()
             result["routes"] = v or None
+        elif line.startswith("proto="):
+            v = line.split("=", 1)[1].strip()
+            result["proto"] = v or None
+        elif line.startswith("server="):
+            v = line.split("=", 1)[1].strip()
+            result["server"] = v or None
     return result

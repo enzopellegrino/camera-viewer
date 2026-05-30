@@ -37,6 +37,9 @@ body {
 .status { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
 .status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--err); }
 .status--on .dot { background: var(--ok); }
+.status--on { color: var(--text); font-weight: 600; }
+.status--warn .dot { background: #f5a623; }
+.status--warn { color: var(--text); }
 
 .tabs { display: flex; background: var(--panel-2); border-bottom: 1px solid var(--border); }
 .tab {
@@ -109,4 +112,7 @@ input:focus, select:focus { border-color: var(--accent); }
 .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 24px 0; }
 
 .vpn-detail { margin-top: 12px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+.vpn-info-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.vpn-info-label { color: var(--muted); padding: 4px 12px 4px 0; white-space: nowrap; vertical-align: top; }
+.vpn-info-value { color: var(--text); padding: 4px 0; word-break: break-all; font-weight: 500; }
 input[type="file"] { padding: 9px; }

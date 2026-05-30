@@ -166,6 +166,62 @@ $("#cam-save").addEventListener("click", async () => {
   }
 });
 
+// ── Wallpaper ─────────────────────────────────────────────────────────────────
+async function loadWallpaper() {
+  const { data } = await api("/api/wallpaper");
+  if (data.custom && data.url) {
+    const box = $("#wallpaper-preview-box");
+    const img = $("#wallpaper-preview");
+    img.src = data.url + "?t=" + Date.now();
+    box.hidden = false;
+  }
+}
+
+const wallpaperFile = $("#wallpaper-file");
+const wallpaperApply = $("#wallpaper-apply");
+const wallpaperLabel = $("#wallpaper-label");
+
+wallpaperFile.addEventListener("change", () => {
+  const f = wallpaperFile.files[0];
+  if (!f) return;
+  wallpaperLabel.textContent = "📷 " + f.name;
+  wallpaperApply.disabled = false;
+  // Anteprima locale
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = $("#wallpaper-preview");
+    img.src = e.target.result;
+    $("#wallpaper-preview-box").hidden = false;
+  };
+  reader.readAsDataURL(f);
+});
+
+wallpaperApply.addEventListener("click", async () => {
+  const f = wallpaperFile.files[0];
+  if (!f) return;
+  wallpaperApply.textContent = "Invio…";
+  wallpaperApply.disabled = true;
+  const form = new FormData();
+  form.append("file", f);
+  const res = await fetch("/api/wallpaper", { method: "POST", body: form });
+  const data = await res.json();
+  toast(data.message || (data.ok ? "Sfondo aggiornato" : "Errore"), data.ok ? "ok" : "err");
+  wallpaperApply.textContent = "Applica sfondo";
+  wallpaperApply.disabled = false;
+  if (data.ok) loadWallpaper();
+});
+
+$("#wallpaper-reset").addEventListener("click", async () => {
+  const { ok, data } = await api("/api/wallpaper", { method: "DELETE" });
+  toast(data.message || (ok ? "Sfondo ripristinato" : "Errore"), ok ? "ok" : "err");
+  if (ok) {
+    $("#wallpaper-preview-box").hidden = true;
+    wallpaperLabel.textContent = "📂 Scegli un'immagine (JPG, PNG, WEBP)";
+    wallpaperFile.value = "";
+    wallpaperApply.disabled = true;
+  }
+});
+
 // ── Settings ──────────────────────────────────────────────────────────────────
 async function loadSettings() {
   const { data } = await api("/api/settings");
@@ -174,12 +230,28 @@ async function loadSettings() {
 }
 
 $("#set-save").addEventListener("click", async () => {
+  const btn = $("#set-save");
+  btn.textContent = "Salvataggio…";
+  btn.disabled = true;
+
   const payload = {
     layout: $("#set-layout").value,
     render_fps: parseInt($("#set-fps").value, 10),
   };
   const { ok } = await api("/api/settings", { method: "POST", body: JSON.stringify(payload) });
-  toast(ok ? "Impostazioni salvate" : "Errore", ok ? "ok" : "err");
+  if (!ok) {
+    toast("Errore nel salvataggio", "err");
+    btn.textContent = "Applica — salva e aggiorna griglia";
+    btn.disabled = false;
+    return;
+  }
+
+  btn.textContent = "Riavvio viewer…";
+  await api("/api/restart-viewer", { method: "POST" });
+  toast("Griglia aggiornata — viewer riavviato", "ok");
+
+  btn.textContent = "Applica — salva e aggiorna griglia";
+  btn.disabled = false;
 });
 
 // ── VPN ───────────────────────────────────────────────────────────────────────
@@ -215,42 +287,68 @@ function fmtBytes(n) {
   return n.toFixed(1) + " " + u[i];
 }
 
+function vpnRow(label, value) {
+  if (!value) return "";
+  return `<tr><td class="vpn-info-label">${escapeHtml(label)}</td><td class="vpn-info-value">${escapeHtml(value)}</td></tr>`;
+}
+
 async function loadVpnStatus() {
   const { data } = await api("/api/vpn");
   const st = $("#vpn-status");
   const txt = $("#vpn-status-text");
   const detail = $("#vpn-detail");
+  const rows = $("#vpn-info-rows");
   const actions = $("#vpn-actions");
+  const form = $("#vpn-form");
 
   if (data.active) {
+    const proto = data.protocol === "openvpn" ? "OpenVPN" : "WireGuard";
+    const transport = (data.proto || "").toUpperCase();
+    const badge = transport ? ` · ${transport}` : "";
     st.className = "status status--on";
-    txt.textContent = `VPN attiva (${data.protocol === "openvpn" ? "OpenVPN" : "WireGuard"})`;
+    txt.textContent = `${proto} attiva${badge}`;
     detail.hidden = false;
+
     if (data.protocol === "openvpn") {
-      detail.innerHTML = `IP tunnel: ${escapeHtml(data.tun_ip || "?")}<br>
-        Route camere: ${escapeHtml(data.routes || "?")}`;
+      rows.innerHTML =
+        vpnRow("Server", data.server) +
+        vpnRow("IP tunnel", data.tun_ip) +
+        vpnRow("Route camere", data.routes);
     } else {
       const hs = data.last_handshake
         ? new Date(data.last_handshake * 1000).toLocaleTimeString()
         : "in attesa…";
-      detail.innerHTML = `Endpoint: ${escapeHtml(data.endpoint || "?")}<br>
-        Subnet: ${escapeHtml(data.allowed_ips || "?")}<br>
-        Ultimo handshake: ${hs}<br>
-        ↓ ${fmtBytes(data.rx)} · ↑ ${fmtBytes(data.tx)}`;
+      rows.innerHTML =
+        vpnRow("Protocollo", "WireGuard") +
+        vpnRow("Endpoint", data.endpoint) +
+        vpnRow("Subnet", data.allowed_ips) +
+        vpnRow("Ultimo handshake", hs) +
+        vpnRow("Traffico", `↓ ${fmtBytes(data.rx)} · ↑ ${fmtBytes(data.tx)}`);
     }
     actions.hidden = false;
+    form.hidden = true;
   } else if (data.configured) {
-    st.className = "status status--off";
-    txt.textContent = "VPN configurata ma non attiva";
-    detail.hidden = true;
+    const proto = data.protocol === "openvpn" ? "OpenVPN" : "WireGuard";
+    st.className = "status status--warn";
+    txt.textContent = `${proto} configurata ma non attiva`;
+    rows.innerHTML = vpnRow("Protocollo", data.protocol === "openvpn" ? `OpenVPN ${data.proto || ""}` : "WireGuard") +
+                     vpnRow("Server", data.server);
+    detail.hidden = false;
     actions.hidden = false;
+    form.hidden = true;
   } else {
     st.className = "status status--off";
     txt.textContent = "VPN non configurata";
     detail.hidden = true;
     actions.hidden = true;
+    form.hidden = false;
   }
 }
+
+$("#vpn-reconfigure").addEventListener("click", () => {
+  $("#vpn-form").hidden = false;
+  $("#vpn-form").scrollIntoView({ behavior: "smooth" });
+});
 
 function readFileText(input) {
   return new Promise((resolve) => {
@@ -341,4 +439,5 @@ refreshStatus();
 loadCameras();
 loadSettings();
 loadVpnStatus();
+loadWallpaper();
 setInterval(refreshStatus, 8000);

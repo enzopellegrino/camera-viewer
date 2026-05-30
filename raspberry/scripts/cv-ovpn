@@ -67,6 +67,13 @@ case "$action" in
     echo "tun_ip=${ip_addr%%/*}"
     routes=$(ip route show dev "$IFACE" 2>/dev/null | awk '{print $1}' | grep -v '^default' | paste -sd',' -)
     echo "routes=${routes}"
+    # Extract proto and server from the config (readable as root)
+    if [[ -f "$conf" ]]; then
+      proto=$(grep -m1 '^proto ' "$conf" | awk '{print toupper($2)}')
+      server=$(grep -m1 '^remote ' "$conf" | awk '{print $2}')
+      echo "proto=${proto}"
+      echo "server=${server}"
+    fi
     ;;
   remove)
     systemctl disable "$unit" >/dev/null 2>&1 || true

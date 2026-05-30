@@ -77,75 +77,80 @@
     <!-- ── VPN ────────────────────────────────────────────────── -->
     <section id="tab-vpn" class="panel">
       <h2>VPN</h2>
-      <p class="hint">Per le telecamere raggiungibili solo via VPN. Solo le subnet che indichi passano nel tunnel: la rete attuale non si perde (split-tunnel).</p>
+      <p class="hint">Per le telecamere raggiungibili solo via VPN. Solo le subnet indicate passano nel tunnel (split-tunnel).</p>
 
+      <!-- Card stato attivo -->
       <div id="vpn-state" class="box">
         <div class="status status--off" id="vpn-status">
           <span class="dot"></span><span id="vpn-status-text">VPN non configurata</span>
         </div>
-        <div id="vpn-detail" class="vpn-detail" hidden></div>
+        <table id="vpn-detail" class="vpn-info-table" hidden>
+          <tbody id="vpn-info-rows"></tbody>
+        </table>
         <div class="row" id="vpn-actions" hidden>
           <button id="vpn-disable" class="btn">Disattiva</button>
+          <button id="vpn-reconfigure" class="btn">Riconfigura</button>
           <button id="vpn-remove" class="btn icon-btn del" style="flex:0 0 auto">Rimuovi</button>
         </div>
       </div>
 
-      <label>Protocollo VPN</label>
-      <div class="seg">
-        <button id="vpn-proto-wg" class="seg__btn is-active">WireGuard</button>
-        <button id="vpn-proto-ovpn" class="seg__btn">OpenVPN</button>
-      </div>
-
-      <label>Subnet / IP delle telecamere remote</label>
-      <input id="vpn-subnets" type="text" placeholder="es. 10.8.0.0/24, 10.8.1.50" />
-      <p class="hint">Separa con virgole. Solo questi indirizzi passeranno nel tunnel.</p>
-
-      <!-- WireGuard -->
-      <div id="wg-section">
+      <!-- Form configurazione (nascosto di default, mostrato da loadVpnStatus se non configurata) -->
+      <div id="vpn-form" hidden>
+        <label>Protocollo VPN</label>
         <div class="seg">
-          <button id="vpn-mode-file" class="seg__btn is-active">Carica file .conf</button>
-          <button id="vpn-mode-manual" class="seg__btn">Inserimento manuale</button>
+          <button id="vpn-proto-wg" class="seg__btn is-active">WireGuard</button>
+          <button id="vpn-proto-ovpn" class="seg__btn">OpenVPN</button>
         </div>
 
-        <div id="vpn-file-box" class="box">
-          <label>File di configurazione WireGuard (.conf)</label>
-          <input id="vpn-file" type="file" accept=".conf,text/plain" />
-          <p class="hint">L'AllowedIPs del file verrà sostituito con le subnet indicate sopra.</p>
+        <label>Subnet / IP delle telecamere remote</label>
+        <input id="vpn-subnets" type="text" placeholder="es. 10.8.0.0/24, 10.8.1.50" />
+        <p class="hint">Separa con virgole. Solo questi indirizzi passeranno nel tunnel.</p>
+
+        <!-- WireGuard -->
+        <div id="wg-section">
+          <div class="seg">
+            <button id="vpn-mode-file" class="seg__btn is-active">Carica file .conf</button>
+            <button id="vpn-mode-manual" class="seg__btn">Inserimento manuale</button>
+          </div>
+          <div id="vpn-file-box" class="box">
+            <label>File di configurazione WireGuard (.conf)</label>
+            <input id="vpn-file" type="file" accept=".conf,text/plain" />
+            <p class="hint">L'AllowedIPs del file verrà sostituito con le subnet indicate sopra.</p>
+          </div>
+          <div id="vpn-manual-box" class="box" hidden>
+            <label>PrivateKey (Interface)</label>
+            <input id="vpn-private-key" type="text" placeholder="chiave privata" />
+            <label>Address (Interface)</label>
+            <input id="vpn-address" type="text" placeholder="es. 10.8.0.2/32" />
+            <label>Peer PublicKey</label>
+            <input id="vpn-public-key" type="text" placeholder="chiave pubblica del server" />
+            <label>PresharedKey (opzionale)</label>
+            <input id="vpn-psk" type="text" placeholder="se previsto" />
+            <label>Endpoint</label>
+            <input id="vpn-endpoint" type="text" placeholder="es. vpn.esempio.it:51820" />
+          </div>
         </div>
 
-        <div id="vpn-manual-box" class="box" hidden>
-          <label>PrivateKey (Interface)</label>
-          <input id="vpn-private-key" type="text" placeholder="chiave privata" />
-          <label>Address (Interface)</label>
-          <input id="vpn-address" type="text" placeholder="es. 10.8.0.2/32" />
-          <label>Peer PublicKey</label>
-          <input id="vpn-public-key" type="text" placeholder="chiave pubblica del server" />
-          <label>PresharedKey (opzionale)</label>
-          <input id="vpn-psk" type="text" placeholder="se previsto" />
-          <label>Endpoint</label>
-          <input id="vpn-endpoint" type="text" placeholder="es. vpn.esempio.it:51820" />
+        <!-- OpenVPN -->
+        <div id="ovpn-section" hidden>
+          <div class="box">
+            <label>File di configurazione OpenVPN (.ovpn)</label>
+            <input id="ovpn-file" type="file" accept=".ovpn,.conf,text/plain" />
+            <label>Username (se richiesto)</label>
+            <input id="ovpn-user" type="text" autocomplete="off" placeholder="utente VPN" />
+            <label>Password (se richiesta)</label>
+            <input id="ovpn-pass" type="password" autocomplete="off" placeholder="password VPN" />
+            <p class="hint">Le route pushate dal server vengono ignorate: passano solo le subnet indicate sopra.</p>
+          </div>
         </div>
+
+        <label class="row" style="align-items:center; gap:8px;">
+          <input type="checkbox" id="vpn-boot" checked style="width:auto" />
+          <span>Riconnetti automaticamente all'avvio</span>
+        </label>
+
+        <button id="vpn-apply" class="btn btn--primary btn--block">Attiva VPN</button>
       </div>
-
-      <!-- OpenVPN -->
-      <div id="ovpn-section" hidden>
-        <div class="box">
-          <label>File di configurazione OpenVPN (.ovpn)</label>
-          <input id="ovpn-file" type="file" accept=".ovpn,.conf,text/plain" />
-          <label>Username (se richiesto)</label>
-          <input id="ovpn-user" type="text" autocomplete="off" placeholder="utente VPN" />
-          <label>Password (se richiesta)</label>
-          <input id="ovpn-pass" type="password" autocomplete="off" placeholder="password VPN" />
-          <p class="hint">Le route pushate dal server vengono ignorate: passano solo le subnet indicate sopra.</p>
-        </div>
-      </div>
-
-      <label class="row" style="align-items:center; gap:8px;">
-        <input type="checkbox" id="vpn-boot" checked style="width:auto" />
-        <span>Riconnetti automaticamente all'avvio</span>
-      </label>
-
-      <button id="vpn-apply" class="btn btn--primary btn--block">Attiva VPN</button>
     </section>
 
     <!-- ── IMPOSTAZIONI ───────────────────────────────────────── -->
@@ -174,13 +179,31 @@
         <option value="30">30 fps</option>
       </select>
 
-      <button id="set-save" class="btn btn--primary btn--block">Salva impostazioni</button>
+      <button id="set-save" class="btn btn--primary btn--block">Applica — salva e aggiorna griglia</button>
 
       <hr style="border:none; border-top:1px solid var(--border); margin:24px 0" />
 
-      <h2>Avvio</h2>
-      <p class="hint">Quando hai finito di configurare, avvia il viewer: il dispositivo si riavvia e mostra le telecamere sul monitor.</p>
-      <button id="apply-btn" class="btn btn--primary btn--block">✓ Salva e avvia il viewer</button>
+      <h2>Sfondo desktop</h2>
+      <div id="wallpaper-preview-box" hidden>
+        <img id="wallpaper-preview" src="" alt="Sfondo attuale"
+             style="width:100%; border-radius:10px; margin-bottom:12px; object-fit:cover; max-height:160px;" />
+      </div>
+      <div class="box" style="border-style:dashed; text-align:center; padding:24px;">
+        <label style="cursor:pointer; display:block;">
+          <span id="wallpaper-label">📂 Scegli un'immagine (JPG, PNG, WEBP)</span>
+          <input id="wallpaper-file" type="file" accept="image/*" style="display:none" />
+        </label>
+      </div>
+      <div class="row" style="margin-top:12px; gap:8px;">
+        <button id="wallpaper-apply" class="btn btn--primary" style="flex:1" disabled>Applica sfondo</button>
+        <button id="wallpaper-reset" class="btn" style="flex:0 0 auto">Ripristina</button>
+      </div>
+
+      <hr style="border:none; border-top:1px solid var(--border); margin:24px 0" />
+
+      <h2>Primo avvio</h2>
+      <p class="hint">Solo la prima volta (o dopo aver azzerato la configurazione): il dispositivo si riavvia completamente e avvia il viewer.</p>
+      <button id="apply-btn" class="btn btn--block">Riavvia dispositivo e avvia viewer</button>
     </section>
   </main>
 
