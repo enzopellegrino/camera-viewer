@@ -76,7 +76,7 @@
 
     <!-- ── VPN ────────────────────────────────────────────────── -->
     <section id="tab-vpn" class="panel">
-      <h2>VPN (WireGuard)</h2>
+      <h2>VPN</h2>
       <p class="hint">Per le telecamere raggiungibili solo via VPN. Solo le subnet che indichi passano nel tunnel: la rete attuale non si perde (split-tunnel).</p>
 
       <div id="vpn-state" class="box">
@@ -90,32 +90,54 @@
         </div>
       </div>
 
+      <label>Protocollo VPN</label>
+      <div class="seg">
+        <button id="vpn-proto-wg" class="seg__btn is-active">WireGuard</button>
+        <button id="vpn-proto-ovpn" class="seg__btn">OpenVPN</button>
+      </div>
+
       <label>Subnet / IP delle telecamere remote</label>
       <input id="vpn-subnets" type="text" placeholder="es. 10.8.0.0/24, 10.8.1.50" />
       <p class="hint">Separa con virgole. Solo questi indirizzi passeranno nel tunnel.</p>
 
-      <div class="seg">
-        <button id="vpn-mode-file" class="seg__btn is-active">Carica file .conf</button>
-        <button id="vpn-mode-manual" class="seg__btn">Inserimento manuale</button>
+      <!-- WireGuard -->
+      <div id="wg-section">
+        <div class="seg">
+          <button id="vpn-mode-file" class="seg__btn is-active">Carica file .conf</button>
+          <button id="vpn-mode-manual" class="seg__btn">Inserimento manuale</button>
+        </div>
+
+        <div id="vpn-file-box" class="box">
+          <label>File di configurazione WireGuard (.conf)</label>
+          <input id="vpn-file" type="file" accept=".conf,text/plain" />
+          <p class="hint">L'AllowedIPs del file verrà sostituito con le subnet indicate sopra.</p>
+        </div>
+
+        <div id="vpn-manual-box" class="box" hidden>
+          <label>PrivateKey (Interface)</label>
+          <input id="vpn-private-key" type="text" placeholder="chiave privata" />
+          <label>Address (Interface)</label>
+          <input id="vpn-address" type="text" placeholder="es. 10.8.0.2/32" />
+          <label>Peer PublicKey</label>
+          <input id="vpn-public-key" type="text" placeholder="chiave pubblica del server" />
+          <label>PresharedKey (opzionale)</label>
+          <input id="vpn-psk" type="text" placeholder="se previsto" />
+          <label>Endpoint</label>
+          <input id="vpn-endpoint" type="text" placeholder="es. vpn.esempio.it:51820" />
+        </div>
       </div>
 
-      <div id="vpn-file-box" class="box">
-        <label>File di configurazione WireGuard (.conf)</label>
-        <input id="vpn-file" type="file" accept=".conf,text/plain" />
-        <p class="hint">L'AllowedIPs del file verrà sostituito con le subnet indicate sopra.</p>
-      </div>
-
-      <div id="vpn-manual-box" class="box" hidden>
-        <label>PrivateKey (Interface)</label>
-        <input id="vpn-private-key" type="text" placeholder="chiave privata" />
-        <label>Address (Interface)</label>
-        <input id="vpn-address" type="text" placeholder="es. 10.8.0.2/32" />
-        <label>Peer PublicKey</label>
-        <input id="vpn-public-key" type="text" placeholder="chiave pubblica del server" />
-        <label>PresharedKey (opzionale)</label>
-        <input id="vpn-psk" type="text" placeholder="se previsto" />
-        <label>Endpoint</label>
-        <input id="vpn-endpoint" type="text" placeholder="es. vpn.esempio.it:51820" />
+      <!-- OpenVPN -->
+      <div id="ovpn-section" hidden>
+        <div class="box">
+          <label>File di configurazione OpenVPN (.ovpn)</label>
+          <input id="ovpn-file" type="file" accept=".ovpn,.conf,text/plain" />
+          <label>Username (se richiesto)</label>
+          <input id="ovpn-user" type="text" autocomplete="off" placeholder="utente VPN" />
+          <label>Password (se richiesta)</label>
+          <input id="ovpn-pass" type="password" autocomplete="off" placeholder="password VPN" />
+          <p class="hint">Le route pushate dal server vengono ignorate: passano solo le subnet indicate sopra.</p>
+        </div>
       </div>
 
       <label class="row" style="align-items:center; gap:8px;">

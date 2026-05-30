@@ -183,6 +183,19 @@ $("#set-save").addEventListener("click", async () => {
 });
 
 // ── VPN ───────────────────────────────────────────────────────────────────────
+let vpnProto = "wireguard";
+$("#vpn-proto-wg").addEventListener("click", () => setVpnProto("wireguard"));
+$("#vpn-proto-ovpn").addEventListener("click", () => setVpnProto("openvpn"));
+
+function setVpnProto(p) {
+  vpnProto = p;
+  const wg = p === "wireguard";
+  $("#vpn-proto-wg").classList.toggle("is-active", wg);
+  $("#vpn-proto-ovpn").classList.toggle("is-active", !wg);
+  $("#wg-section").hidden = !wg;
+  $("#ovpn-section").hidden = wg;
+}
+
 $("#vpn-mode-file").addEventListener("click", () => setVpnMode("file"));
 $("#vpn-mode-manual").addEventListener("click", () => setVpnMode("manual"));
 
@@ -211,15 +224,20 @@ async function loadVpnStatus() {
 
   if (data.active) {
     st.className = "status status--on";
-    txt.textContent = "VPN attiva";
-    const hs = data.last_handshake
-      ? new Date(data.last_handshake * 1000).toLocaleTimeString()
-      : "in attesa…";
+    txt.textContent = `VPN attiva (${data.protocol === "openvpn" ? "OpenVPN" : "WireGuard"})`;
     detail.hidden = false;
-    detail.innerHTML = `Endpoint: ${escapeHtml(data.endpoint || "?")}<br>
-      Subnet: ${escapeHtml(data.allowed_ips || "?")}<br>
-      Ultimo handshake: ${hs}<br>
-      ↓ ${fmtBytes(data.rx)} · ↑ ${fmtBytes(data.tx)}`;
+    if (data.protocol === "openvpn") {
+      detail.innerHTML = `IP tunnel: ${escapeHtml(data.tun_ip || "?")}<br>
+        Route camere: ${escapeHtml(data.routes || "?")}`;
+    } else {
+      const hs = data.last_handshake
+        ? new Date(data.last_handshake * 1000).toLocaleTimeString()
+        : "in attesa…";
+      detail.innerHTML = `Endpoint: ${escapeHtml(data.endpoint || "?")}<br>
+        Subnet: ${escapeHtml(data.allowed_ips || "?")}<br>
+        Ultimo handshake: ${hs}<br>
+        ↓ ${fmtBytes(data.rx)} · ↑ ${fmtBytes(data.tx)}`;
+    }
     actions.hidden = false;
   } else if (data.configured) {
     st.className = "status status--off";
@@ -247,24 +265,33 @@ function readFileText(input) {
 $("#vpn-apply").addEventListener("click", async () => {
   const subnets = $("#vpn-subnets").value;
   if (!subnets.trim()) { toast("Indica le subnet delle camere remote", "err"); return; }
-  const fileMode = $("#vpn-mode-file").classList.contains("is-active");
   const payload = {
+    protocol: vpnProto,
     camera_subnets: subnets,
     enable_on_boot: $("#vpn-boot").checked,
   };
 
-  if (fileMode) {
-    const text = await readFileText($("#vpn-file"));
-    if (!text) { toast("Seleziona un file .conf", "err"); return; }
-    payload.mode = "file";
+  if (vpnProto === "openvpn") {
+    const text = await readFileText($("#ovpn-file"));
+    if (!text) { toast("Seleziona un file .ovpn", "err"); return; }
     payload.conf_text = text;
+    payload.username = $("#ovpn-user").value;
+    payload.password = $("#ovpn-pass").value;
   } else {
-    payload.mode = "manual";
-    payload.private_key = $("#vpn-private-key").value;
-    payload.address = $("#vpn-address").value;
-    payload.peer_public_key = $("#vpn-public-key").value;
-    payload.preshared_key = $("#vpn-psk").value;
-    payload.endpoint = $("#vpn-endpoint").value;
+    const fileMode = $("#vpn-mode-file").classList.contains("is-active");
+    if (fileMode) {
+      const text = await readFileText($("#vpn-file"));
+      if (!text) { toast("Seleziona un file .conf", "err"); return; }
+      payload.mode = "file";
+      payload.conf_text = text;
+    } else {
+      payload.mode = "manual";
+      payload.private_key = $("#vpn-private-key").value;
+      payload.address = $("#vpn-address").value;
+      payload.peer_public_key = $("#vpn-public-key").value;
+      payload.preshared_key = $("#vpn-psk").value;
+      payload.endpoint = $("#vpn-endpoint").value;
+    }
   }
 
   $("#vpn-apply").textContent = "Attivazione…";

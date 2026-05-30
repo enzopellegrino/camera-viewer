@@ -21,6 +21,7 @@ from flask import Flask, jsonify, redirect, request, send_from_directory
 from . import config_store as store
 from . import network
 from . import vpn
+from . import vpn_openvpn
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
@@ -161,16 +162,40 @@ def _parse_subnets(value) -> list[str]:
 
 @app.route("/api/vpn", methods=["GET"])
 def api_vpn_status():
-    return jsonify(vpn.status())
+    """Report the active/configured tunnel (WireGuard or OpenVPN)."""
+    ovpn = vpn_openvpn.status()
+    if ovpn["active"] or ovpn["configured"]:
+        return jsonify({"protocol": "openvpn", **ovpn})
+    wg = vpn.status()
+    return jsonify({"protocol": "wireguard", **wg})
 
 
 @app.route("/api/vpn", methods=["POST"])
 def api_vpn_apply():
     data = request.get_json(force=True, silent=True) or {}
     subnets = _parse_subnets(data.get("camera_subnets"))
-    mode = data.get("mode", "manual")
+    protocol = data.get("protocol", "wireguard")
     enable_on_boot = bool(data.get("enable_on_boot", True))
 
+    if protocol == "openvpn":
+        # Only one tunnel at a time: tear down WireGuard first.
+        vpn.remove()
+        ok, msg = vpn_openvpn.apply_config(
+            data.get("conf_text", ""), subnets,
+            username=data.get("username", ""), password=data.get("password", ""),
+            enable_on_boot=enable_on_boot,
+        )
+        if ok:
+            validated = vpn.validate_subnets(subnets)
+            def _v(cfg):
+                cfg["vpn"] = {"enabled": True, "protocol": "openvpn",
+                              "camera_subnets": validated}
+            store.mutate(_v)
+        return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
+
+    # WireGuard
+    vpn_openvpn.remove()  # only one tunnel at a time
+    mode = data.get("mode", "manual")
     try:
         if mode == "file":
             fields = vpn.parse_wg_conf(data.get("conf_text", ""))
@@ -190,28 +215,33 @@ def api_vpn_apply():
     if ok:
         validated = vpn.validate_subnets(subnets)
         def _v(cfg):
-            cfg["vpn"] = {"enabled": True, "camera_subnets": validated}
+            cfg["vpn"] = {"enabled": True, "protocol": "wireguard",
+                          "camera_subnets": validated}
         store.mutate(_v)
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 400)
 
 
 @app.route("/api/vpn/disable", methods=["POST"])
 def api_vpn_disable():
-    ok, msg = vpn.disable()
+    # disable whichever is active
+    ok1, _ = vpn.disable()
+    ok2, _ = vpn_openvpn.disable()
+    ok = ok1 or ok2
     if ok:
         def _v(cfg):
             cfg.setdefault("vpn", {})["enabled"] = False
         store.mutate(_v)
-    return jsonify({"ok": ok, "message": msg})
+    return jsonify({"ok": ok, "message": "VPN disattivata"})
 
 
 @app.route("/api/vpn", methods=["DELETE"])
 def api_vpn_remove():
-    ok, msg = vpn.remove()
+    vpn.remove()
+    vpn_openvpn.remove()
     def _v(cfg):
         cfg["vpn"] = {"enabled": False}
     store.mutate(_v)
-    return jsonify({"ok": ok, "message": msg})
+    return jsonify({"ok": True, "message": "VPN rimossa"})
 
 
 # ── API: mode transitions (apply & reboot) ───────────────────────────────────
