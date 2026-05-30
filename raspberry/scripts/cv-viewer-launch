@@ -9,7 +9,12 @@
 # Uses absolute paths (NOT $HOME): the labwc autostart environment may not
 # export HOME, which previously made the force-setup check fail.
 CFG_DIR="/home/pi/.config/camera-viewer"
-export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+# GstVideoOverlay renders into a native X11 window (XID).
+# Run Qt in X11 mode via XWayland so winId() returns a valid XID.
+export QT_QPA_PLATFORM=xcb
+export DISPLAY="${DISPLAY:-:0}"
+export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
 export CAMERA_VIEWER_CONFIG="$CFG_DIR/config.json"
 
 [ -f "$CFG_DIR/force-setup" ] && exit 0   # provisioning forced -> no viewer
