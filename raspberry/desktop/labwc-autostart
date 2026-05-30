@@ -1,0 +1,13 @@
+# labwc session autostart for the Camera Viewer kiosk.
+# Install to ~/.config/labwc/autostart (user pi).
+#
+# IMPORTANT: labwc runs BOTH the system autostart (/etc/xdg/labwc/autostart,
+# which starts the panel/file manager) AND this user autostart. So we must NOT
+# repeat the desktop components here, or the panel starts twice (double bar).
+# We add ONLY the viewer launcher.
+#
+# cv-viewer-launch starts the viewer only in operational mode (cameras
+# configured and no force-setup); in provisioning mode the normal desktop
+# stays visible for the captive portal.
+
+/home/pi/camera-viewer/raspberry/scripts/cv-viewer-launch &

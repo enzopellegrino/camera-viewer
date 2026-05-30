@@ -1,0 +1,23 @@
+#!/bin/bash
+# cv-viewer-launch — start the Camera Viewer in kiosk mode on the monitor.
+#
+# Launched by the desktop session autostart (labwc) as user pi, so it has the
+# Wayland display. It starts the viewer ONLY in operational mode: cameras
+# configured AND no force-setup flag. In provisioning mode it does nothing
+# (the captive portal / AP handle setup).
+#
+# Uses absolute paths (NOT $HOME): the labwc autostart environment may not
+# export HOME, which previously made the force-setup check fail.
+CFG_DIR="/home/pi/.config/camera-viewer"
+export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland}"
+export CAMERA_VIEWER_CONFIG="$CFG_DIR/config.json"
+
+[ -f "$CFG_DIR/force-setup" ] && exit 0   # provisioning forced -> no viewer
+
+# Start only if at least one camera is configured.
+# Use python3 -c (not a heredoc) so it works even when stdin is /dev/null
+# (the desktop autostart / nohup redirect stdin).
+python3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG_DIR/config.json')).get('cameras') else 1)" || exit 0
+
+cd /home/pi/camera-viewer || exit 0
+exec python3 main.py >/tmp/viewer.log 2>&1
