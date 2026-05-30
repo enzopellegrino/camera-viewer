@@ -143,6 +143,19 @@ BENCHMARK sul Pi (12 stream 480p @15fps, misurato):
 
 Ambiente verificato sul Pi: OpenCV con GStreamer 1.26, `v4l2h264dec` OK,
 decoder HW presenti (bcm2835-codec-decode /dev/video10-12, rpi-hevc-dec).
+
+**REQUISITO CRITICO**: aggiungere `gpu_mem=128` in `/boot/firmware/config.txt`.
+Con gpu_mem=76 (default), `bcm2835-codec` non riesce ad inizializzare
+`ril.video_decode` ("Not enough GPU mem?") e il decoder fallisce silenziosamente.
+Con 128MB tutto funziona; 8 stream HW testati OK (load ~0.5).
+
+**Pipeline corretta** (v4l2convert necessario per bridge DMABuf→system memory):
+```
+rtspsrc ! rtph264depay ! h264parse ! v4l2h264dec !
+v4l2convert ! video/x-raw,format=I420 !
+videoconvert ! video/x-raw,format=BGR ! appsink
+```
+
 - Usare i SUBSTREAM (l'utente conferma che le sue camere li hanno) + FPS limitato.
 - H.265: kernel ha rpi-hevc-dec ma manca l'elemento gstreamer v4l2h265dec
   (plugin extra); la maggior parte delle camere usa H.264.

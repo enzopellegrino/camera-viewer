@@ -1,26 +1,52 @@
 import os
 import sys
+import time
 import cv2
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMutex, QMutexLocker
 from PySide6.QtGui import QImage, QPixmap, QPainter, QCursor
 
-_DEFAULT_FPS = 30
+_DEFAULT_FPS = 25
 
-# On the Raspberry Pi we decode H.264 in HARDWARE via GStreamer (v4l2h264dec),
-# which offloads the CPU. On Mac/Windows we keep the FFmpeg software path.
-# Override with CAMERA_VIEWER_HWDEC=0 to force software everywhere.
-_USE_HWDEC = (
-    sys.platform.startswith("linux")
-    and os.environ.get("CAMERA_VIEWER_HWDEC", "1") != "0"
-)
+# Hardware decode via v4l2h264dec offloads the CPU for pure GStreamer pipelines
+# (e.g. fakesink), but when frames must pass through Python (cap.read →
+# cvtColor → QImage) the bottleneck is the Python processing, not the decode.
+# In that case HW decode adds DMABuf↔system-memory transfer overhead and is
+# slower than software decode.  Keep this False until the viewer moves to a
+# GPU-composited pipeline that never copies frames into Python.
+# Override with CAMERA_VIEWER_HWDEC=1 to experiment with hardware decode.
+_USE_HWDEC = os.environ.get("CAMERA_VIEWER_HWDEC", "0") == "1"
 
 
 def _gst_hw_pipeline(url: str) -> str:
-    """GStreamer pipeline: RTSP H.264 -> hardware decode -> BGR -> appsink."""
+    """GStreamer pipeline: RTSP H.264 -> hardware decode -> BGR -> appsink.
+
+    v4l2h264dec outputs DMABuf memory; v4l2convert bridges to system memory
+    (I420) so that videoconvert can then produce BGR for OpenCV.
+
+    Requires gpu_mem >= 128 in /boot/firmware/config.txt — the bcm2835-codec
+    VCHIQ component needs enough GPU RAM to initialise the hardware decoder.
+    """
     return (
         f'rtspsrc location="{url}" protocols=tcp latency=200 drop-on-latency=true ! '
         "rtph264depay ! h264parse ! v4l2h264dec ! "
+        "v4l2convert ! video/x-raw,format=I420 ! "
+        "videoconvert ! video/x-raw,format=BGR ! "
+        "appsink drop=true max-buffers=2 sync=false"
+    )
+
+
+def _gst_sw_pipeline(url: str) -> str:
+    """GStreamer pipeline: RTSP -> software H.264/H.265 decode -> BGR -> appsink.
+
+    Uses avdec_h264 with max-threads=1 so that 8 simultaneous streams don't
+    spawn 8×N decode threads competing for CPU.  Single-threaded avdec_h264
+    is fast enough for 720p@25fps; the bottleneck is the Python/Qt rendering
+    path, not the decoder.
+    """
+    return (
+        f'rtspsrc location="{url}" protocols=tcp latency=200 drop-on-latency=true ! '
+        "rtph264depay ! h264parse ! avdec_h264 max-threads=1 ! "
         "videoconvert ! video/x-raw,format=BGR ! "
         "appsink drop=true max-buffers=1 sync=false"
     )
@@ -43,7 +69,7 @@ class _VideoWidget(QWidget):
         if self._pixmap.isNull():
             return
         painter = QPainter(self)
-        scaled = self._pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        scaled = self._pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.FastTransformation)
         x = (self.width() - scaled.width()) // 2
         y = (self.height() - scaled.height()) // 2
         painter.drawPixmap(x, y, scaled)
@@ -60,21 +86,37 @@ class _StreamThread(QThread):
         self._url = url
         self._running = False
         self._mutex = QMutex()
-        # Latest decoded frame, shared between capture loop and emit timer
+        # Latest decoded frame (as QImage), shared between capture loop and render timer.
         self._frame_mutex = QMutex()
         self._pending_frame: QImage | None = None
 
     def _open_capture(self):
-        """Open the stream, preferring hardware decode on the Pi."""
+        """Open the stream via GStreamer (HW or SW decode) or FFmpeg fallback."""
         if _USE_HWDEC:
             cap = cv2.VideoCapture(_gst_hw_pipeline(self._url), cv2.CAP_GSTREAMER)
             if cap.isOpened():
                 return cap
-            # Hardware path failed (e.g. stream is H.265): fall back to software.
+            # Hardware path failed: fall through to software GStreamer pipeline.
+
+        # Software decode via GStreamer (avdec_h264 max-threads=1).
+        # Using GStreamer instead of CAP_FFMPEG gives explicit thread control:
+        # FFmpeg through CAP_FFMPEG spawns cpu_count threads per stream by
+        # default (4 on Pi 4), creating 32+ threads for 8 streams and causing
+        # heavy OS scheduling overhead.
+        cap = cv2.VideoCapture(_gst_sw_pipeline(self._url), cv2.CAP_GSTREAMER)
+        if cap.isOpened():
+            return cap
+
+        # Last resort: FFmpeg (handles H.265 and other codecs automatically).
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
         cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         return cap
+
+    # How many consecutive read() failures before treating the stream as dead.
+    # A single NULL sample from GStreamer is transient (e.g. key-frame boundary,
+    # brief network glitch); we only reconnect after a sustained run of failures.
+    _MAX_CONSECUTIVE_FAILURES = 40
 
     def run(self):
         self._running = True
@@ -84,18 +126,27 @@ class _StreamThread(QThread):
             self.error.emit("Impossibile aprire lo stream")
             return
 
+        consecutive_failures = 0
         while True:
             with QMutexLocker(self._mutex):
                 if not self._running:
                     break
             ret, frame = cap.read()
             if not ret:
-                self.error.emit("Stream interrotto")
-                break
+                consecutive_failures += 1
+                if consecutive_failures >= self._MAX_CONSECUTIVE_FAILURES:
+                    self.error.emit("Stream interrotto")
+                    break
+                # Transient glitch — brief pause to avoid a CPU spin loop,
+                # then let the pipeline recover on its own.
+                time.sleep(0.01)
+                continue
+            consecutive_failures = 0
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             h, w, ch = rgb.shape
             img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
-            # Overwrite pending frame — older frames are dropped if UI hasn't consumed them yet
+            # Overwrite pending frame — older frames are dropped if the UI
+            # render timer hasn't consumed them yet (runs at _DEFAULT_FPS).
             with QMutexLocker(self._frame_mutex):
                 self._pending_frame = img
 
