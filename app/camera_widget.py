@@ -1,10 +1,29 @@
 import os
+import sys
 import cv2
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
 from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMutex, QMutexLocker
 from PySide6.QtGui import QImage, QPixmap, QPainter, QCursor
 
 _DEFAULT_FPS = 30
+
+# On the Raspberry Pi we decode H.264 in HARDWARE via GStreamer (v4l2h264dec),
+# which offloads the CPU. On Mac/Windows we keep the FFmpeg software path.
+# Override with CAMERA_VIEWER_HWDEC=0 to force software everywhere.
+_USE_HWDEC = (
+    sys.platform.startswith("linux")
+    and os.environ.get("CAMERA_VIEWER_HWDEC", "1") != "0"
+)
+
+
+def _gst_hw_pipeline(url: str) -> str:
+    """GStreamer pipeline: RTSP H.264 -> hardware decode -> BGR -> appsink."""
+    return (
+        f'rtspsrc location="{url}" protocols=tcp latency=200 drop-on-latency=true ! '
+        "rtph264depay ! h264parse ! v4l2h264dec ! "
+        "videoconvert ! video/x-raw,format=BGR ! "
+        "appsink drop=true max-buffers=1 sync=false"
+    )
 
 
 # ─── Widget video con paintEvent ─────────────────────────────────────────────
@@ -45,11 +64,21 @@ class _StreamThread(QThread):
         self._frame_mutex = QMutex()
         self._pending_frame: QImage | None = None
 
-    def run(self):
-        self._running = True
+    def _open_capture(self):
+        """Open the stream, preferring hardware decode on the Pi."""
+        if _USE_HWDEC:
+            cap = cv2.VideoCapture(_gst_hw_pipeline(self._url), cv2.CAP_GSTREAMER)
+            if cap.isOpened():
+                return cap
+            # Hardware path failed (e.g. stream is H.265): fall back to software.
         os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
         cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        return cap
+
+    def run(self):
+        self._running = True
+        cap = self._open_capture()
 
         if not cap.isOpened():
             self.error.emit("Impossibile aprire lo stream")

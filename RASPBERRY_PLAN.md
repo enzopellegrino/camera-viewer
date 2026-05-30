@@ -125,21 +125,31 @@ remote passano nel tunnel, il resto del traffico resta sulla rete normale.
 - Servizi systemd
 - Transizione provisioning <-> operativo
 
-### FASE 4bis — Performance viewer: decodifica HARDWARE (per 7-12 camere)
+### FASE 4bis — Viewer Pi dedicato: GStreamer + decodifica HARDWARE
 Caso d'uso: 7-12 telecamere simultanee con substream a bassa risoluzione.
-La decodifica software (OpenCV/FFmpeg attuale) NON regge 12 stream sul Pi 4.
-Soluzione: usare il decoder H.264 hardware del Pi via GStreamer.
-- Verificato sul Pi: OpenCV compilato con GStreamer 1.26, `v4l2h264dec` funziona,
-  decoder HW presenti (bcm2835-codec-decode /dev/video10-12, rpi-hevc-dec)
-- Strategia: in camera_widget._StreamThread, su Linux/Pi usare
-  `cv2.VideoCapture(pipeline, cv2.CAP_GSTREAMER)` con pipeline:
-  `rtspsrc location=URL latency=100 protocols=tcp ! rtph264depay ! h264parse !
-   v4l2h264dec ! videoconvert ! video/x-raw,format=BGR ! appsink drop=true max-buffers=1`
-  Fallback a CAP_FFMPEG (software) su Mac/Windows o se GStreamer non disponibile.
-- Usare i SUBSTREAM delle camere (l'utente conferma che le sue li hanno) +
-  FPS limitato (gia' configurabile) per ridurre ulteriormente il carico.
+
+DECISIONE (confermata con l'utente): sul Raspberry NON si usa l'app PySide6/OpenCV
+(decodifica software). Si usa un VIEWER DEDICATO basato su GStreamer che:
+- decodifica ogni stream RTSP in HARDWARE (`v4l2h264dec`) — solo DECODE, nessun encoding
+- compone gli N stream in una griglia con l'elemento `compositor`
+- mostra a tutto schermo sul monitor (`kmssink` o `glimagesink`)
+- genera la pipeline/griglia dal `config.json` (lo stesso del portale)
+L'app PySide6/OpenCV resta SOLO per Mac/Windows.
+
+BENCHMARK sul Pi (12 stream 480p @15fps, misurato):
+- Software (avdec_h264, come l'app attuale): ~77% CPU su 4 core, Pi quasi non-responsivo
+- Hardware (v4l2h264dec): ~1% CPU, 12 stream senza sforzo
+-> l'HW decode e' la chiave; margine enorme per 12+ camere.
+
+Ambiente verificato sul Pi: OpenCV con GStreamer 1.26, `v4l2h264dec` OK,
+decoder HW presenti (bcm2835-codec-decode /dev/video10-12, rpi-hevc-dec).
+- Usare i SUBSTREAM (l'utente conferma che le sue camere li hanno) + FPS limitato.
 - H.265: kernel ha rpi-hevc-dec ma manca l'elemento gstreamer v4l2h265dec
-  (servirebbe plugin extra); la maggior parte delle camere usa H.264.
+  (plugin extra); la maggior parte delle camere usa H.264.
+- Pipeline indicativa per stream singolo:
+  `rtspsrc location=URL protocols=tcp latency=100 ! rtph264depay ! h264parse !
+   v4l2h264dec ! videoconvert ! compositor.sink_N` (mosaic) `! kmssink`
+- DA TESTARE col monitor collegato (display sink). Il decode HW e' gia' dimostrato.
 
 ### FASE 4ter — Anteprima camere nel portale (opzionale)
 Mostrare le camere anche nel portale web (i browser non leggono RTSP nativo).
