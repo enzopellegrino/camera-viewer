@@ -1,4 +1,5 @@
 import math
+import os
 from PySide6.QtWidgets import QWidget, QGridLayout
 from PySide6.QtCore import Signal
 from .camera_widget import CameraWidget
@@ -78,14 +79,29 @@ class GridWidget(QWidget):
         if self._single is not None:
             return
         self._single = target
+
+        # Rimuove dal layout (ma NON cambia parent — setParent ricreerebbe
+        # la finestra X11, cambiando XID e facendo perdere l'embedding a mpv).
         self._grid.removeWidget(target)
-        target.setParent(self)
         target.setGeometry(0, 0, self.width(), self.height())
         target.raise_()
         target.show()
-        for w in self._widgets:
-            if w is not target:
-                w.hide()
+
+        if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
+            # NUC: zoom puramente geometrico — nessun restart di mpv.
+            # mpv riceve ConfigureNotify e scala automaticamente alla nuova
+            # dimensione. Zero nero, istantaneo.
+            # Gli altri stream continuano a girare (coperti dal widget fullscreen).
+            pass
+        else:
+            # Raspberry Pi: ferma tutto per liberare risorse GPU limitate.
+            from PySide6.QtCore import QTimer
+            for w in self._widgets:
+                w.stop()
+                if w is not target:
+                    w.hide()
+            target._hw_decode = True
+            QTimer.singleShot(500, target._start_stream)
 
     def exit_single_cam(self):
         self._exit_single_cam_internal()
@@ -95,12 +111,21 @@ class GridWidget(QWidget):
             return
         target = self._single
         self._single = None
+        target._hw_decode = False
         idx = self._widgets.index(target)
         row = idx // self._cols
         col = idx % self._cols
         self._grid.addWidget(target, row, col)
-        for w in self._widgets:
-            w.show()
+
+        if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
+            # NUC: mpv non si è mai fermato, torna nella griglia e si ridimensiona.
+            for w in self._widgets:
+                w.show()
+        else:
+            # Pi: riavvia tutto da zero in SW decode.
+            for w in self._widgets:
+                w.show()
+                w._start_stream()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

@@ -1,0 +1,88 @@
+#!/bin/bash
+# cv-ovpn — privileged helper for OpenVPN client management (split-tunnel).
+#
+# Mirrors cv-vpn but for OpenVPN. The Flask app (user pi) calls it via a narrow
+# sudoers rule; it never writes /etc/openvpn or runs openvpn directly itself.
+#
+# Usage:
+#   cv-ovpn install <name>   # read .conf from stdin -> /etc/openvpn/client/<name>.conf (0600)
+#   cv-ovpn auth <name>      # read "user\npass" from stdin -> <name>.auth (0600)
+#   cv-ovpn up <name>        # systemctl start openvpn-client@<name>
+#   cv-ovpn down <name>      # systemctl stop
+#   cv-ovpn enable <name>    # systemctl enable --now (autostart at boot)
+#   cv-ovpn disable <name>   # systemctl disable + stop
+#   cv-ovpn status <name>    # active=/configured=/tun_ip=/routes=
+#   cv-ovpn remove <name>    # disable + stop + delete files
+set -euo pipefail
+
+DIR=/etc/openvpn/client
+IFACE=tuncam
+
+action="${1:-}"
+name="${2:-}"
+
+if [[ ! "$name" =~ ^[a-z0-9-]{1,15}$ ]]; then
+  echo "ERROR: invalid name" >&2
+  exit 2
+fi
+
+conf="$DIR/$name.conf"
+auth="$DIR/$name.auth"
+unit="openvpn-client@$name"
+
+case "$action" in
+  install)
+    umask 077
+    mkdir -p "$DIR"
+    chmod 700 "$DIR"
+    cat > "$conf"
+    chmod 600 "$conf"
+    echo "OK installed $conf"
+    ;;
+  auth)
+    umask 077
+    cat > "$auth"          # line1=user, line2=pass
+    chmod 600 "$auth"
+    echo "OK auth saved"
+    ;;
+  up)
+    systemctl start "$unit"
+    ;;
+  down)
+    systemctl stop "$unit" 2>/dev/null || true
+    ;;
+  enable)
+    systemctl enable --now "$unit" >/dev/null 2>&1 || systemctl start "$unit"
+    echo "OK enabled"
+    ;;
+  disable)
+    systemctl disable "$unit" >/dev/null 2>&1 || true
+    systemctl stop "$unit" 2>/dev/null || true
+    echo "OK disabled"
+    ;;
+  status)
+    if systemctl is-active --quiet "$unit"; then echo "active=yes"; else echo "active=no"; fi
+    [[ -f "$conf" ]] && echo "configured=yes" || echo "configured=no"
+    ip_addr=$(ip -o -4 addr show "$IFACE" 2>/dev/null | awk '{print $4}' | head -1)
+    echo "tun_ip=${ip_addr%%/*}"
+    routes=$(ip route show dev "$IFACE" 2>/dev/null | awk '{print $1}' | grep -v '^default' | paste -sd',' -)
+    echo "routes=${routes}"
+    # Extract proto and server from the config (readable as root)
+    if [[ -f "$conf" ]]; then
+      proto=$(grep -m1 '^proto ' "$conf" | awk '{print toupper($2)}')
+      server=$(grep -m1 '^remote ' "$conf" | awk '{print $2}')
+      echo "proto=${proto}"
+      echo "server=${server}"
+    fi
+    ;;
+  remove)
+    systemctl disable "$unit" >/dev/null 2>&1 || true
+    systemctl stop "$unit" 2>/dev/null || true
+    rm -f "$conf" "$auth"
+    echo "OK removed"
+    ;;
+  *)
+    echo "ERROR: unknown action '$action'" >&2
+    exit 2
+    ;;
+esac

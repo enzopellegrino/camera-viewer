@@ -1,3 +1,4 @@
+import os
 import platform
 from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QDialog, QMessageBox
 from PySide6.QtCore import Qt, QTimer
@@ -71,6 +72,7 @@ class MainWindow(QMainWindow):
         )
         self._grid.camera_clicked.connect(self._on_camera_clicked)
         self._root_vbox.addWidget(self._grid, 1)
+        self._start_cmd_watcher()
 
     def _build_toolbar(self) -> QWidget:
         bar = QWidget()
@@ -205,6 +207,47 @@ class MainWindow(QMainWindow):
         self._grid.load_screen(overridden, self.config.camera_lookup())
 
     # ----------------------------------------------------------- single cam
+
+    # ── Portal IPC ────────────────────────────────────────────────────────────
+
+    _CMD_FILE = "/tmp/cv-viewer-cmd"
+
+    def _start_cmd_watcher(self):
+        """Poll /tmp/cv-viewer-cmd for zoom commands from the portal.
+
+        File content:
+          "zoom:<camera_id>"  → zoom that camera
+          "grid"              → return to grid
+        """
+        t = QTimer(self)
+        t.setInterval(500)
+        t.timeout.connect(self._check_cmd)
+        t.start()
+
+    def _check_cmd(self):
+        try:
+            if not os.path.exists(self._CMD_FILE):
+                return
+            cmd = open(self._CMD_FILE).read().strip()
+            os.remove(self._CMD_FILE)
+        except OSError:
+            return
+
+        if cmd == "grid":
+            if self._single_cam_mode:
+                QTimer.singleShot(0, self._exit_single_cam)
+        elif cmd.startswith("zoom:"):
+            cam_id = cmd[5:]
+            # Find the widget with this camera id
+            if self._grid:
+                for w in self._grid._widgets:
+                    if w.camera_config.get("id") == cam_id:
+                        if self._single_cam_mode:
+                            QTimer.singleShot(0, self._exit_single_cam)
+                            QTimer.singleShot(300, lambda widget=w: self._enter_single_cam(widget))
+                        else:
+                            QTimer.singleShot(0, lambda widget=w: self._enter_single_cam(widget))
+                        break
 
     def _on_camera_clicked(self, widget):
         if self._single_cam_mode:

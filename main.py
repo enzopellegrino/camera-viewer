@@ -39,11 +39,24 @@ def _remove_pid():
 
 
 def _config_path() -> Path:
+    # Explicit override (used on the Raspberry Pi to share the config with the
+    # provisioning web portal).
+    override = os.environ.get("CAMERA_VIEWER_CONFIG")
+    if override:
+        p = Path(override)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
     if getattr(sys, "frozen", False):
         if sys.platform == "win32":
             base = Path(os.environ.get("APPDATA", Path.home())) / "Camera Viewer"
         else:
             base = Path.home() / "Library" / "Application Support" / "Camera Viewer"
+        base.mkdir(parents=True, exist_ok=True)
+        return base / "config.json"
+    # On Linux (e.g. the Pi, running from source) use the same shared location
+    # as the web portal so the viewer reads the cameras configured there.
+    if sys.platform.startswith("linux"):
+        base = Path.home() / ".config" / "camera-viewer"
         base.mkdir(parents=True, exist_ok=True)
         return base / "config.json"
     return Path("config.json")

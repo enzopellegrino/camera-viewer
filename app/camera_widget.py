@@ -1,90 +1,86 @@
+"""Camera widget — embedded mpv backend.
+
+Each camera runs a dedicated mpv process embedded into the Qt widget's
+native X11 window via --wid=<XID>. mpv handles decode, network buffering
+and GPU rendering (--vo=gpu, V3D). Video frames never pass through Python.
+
+Why mpv instead of GStreamer:
+  - Far more robust network buffering: absorbs VPN/internet jitter that made
+    the GStreamer pipeline stutter ("ferma e va").
+  - --vo=gpu uses the Pi 5 V3D GPU for scaling/render (glimagesink crashed
+    under XWayland multi-widget; mpv embeds cleanly via --wid).
+  - --hwdec=auto-safe uses HW decode where usable, SW fallback otherwise.
+
+Qt runs in X11 mode (QT_QPA_PLATFORM=xcb); winId() returns a valid XID for
+each child widget. For judder-free 25fps playback set the monitor to a
+refresh that is a multiple of the source fps (1080p@50Hz).
+"""
 import os
-import cv2
-from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout, QSizePolicy
-from PySide6.QtCore import Qt, QTimer, QThread, Signal, QMutex, QMutexLocker
-from PySide6.QtGui import QImage, QPixmap, QPainter, QCursor
+import signal
+import subprocess
 
-_DEFAULT_FPS = 30
+from PySide6.QtWidgets import QWidget, QLabel, QSizePolicy
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QCursor
 
-
-# ─── Widget video con paintEvent ─────────────────────────────────────────────
-
-class _VideoWidget(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._pixmap = QPixmap()
-        self.setStyleSheet("background-color: #0d0d0d;")
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
-
-    def set_frame(self, img: QImage):
-        self._pixmap = QPixmap.fromImage(img)
-        self.update()
-
-    def paintEvent(self, event):
-        if self._pixmap.isNull():
-            return
-        painter = QPainter(self)
-        scaled = self._pixmap.scaled(self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        x = (self.width() - scaled.width()) // 2
-        y = (self.height() - scaled.height()) // 2
-        painter.drawPixmap(x, y, scaled)
+_DEFAULT_FPS = 25  # kept for main.py settings compatibility
 
 
-# ─── Thread di lettura RTSP ──────────────────────────────────────────────────
+def _mpv_command(url: str, wid: int, passphrase: str = "", hw_decode: bool = False) -> list[str]:
+    """Build the mpv command line for an embedded camera stream.
 
-class _StreamThread(QThread):
-    frame_ready = Signal(QImage)
-    error = Signal(str)
+    Network caching (cache-secs) absorbs jitter for smooth playback; keep it
+    modest so latency stays low. On a local LAN the cache drains instantly.
+    """
+    cmd = [
+        "mpv",
+        f"--wid={wid}",                      # embed into the Qt widget's X11 window
+        "--no-config",                       # ignore user mpv config
+        "--no-audio",
+        "--no-osc",                          # no on-screen controls
+        "--no-input-default-bindings",
+        "--input-conf=/dev/null",
+        "--input-cursor=no",                 # mpv must NOT capture mouse events → Qt handles them
+        "--really-quiet",
+        "--no-border",
+        "--keepaspect=yes",
+        "--vo=gpu",
+        # hwdec set per-protocol and quality mode (see set_quality() below).
+        # Grid mode: SW decode for all (no GPU contention, all cameras visible).
+        # Fullscreen/focus mode: HW decode for the single focused camera (fluid).
+        "--profile=low-latency",   # sets cache=no, readahead=0, sync=audio
+        "--untimed",               # ignore PTS, render immediately
+        "--video-sync=desync",     # no clock sync (no audio reference)
+        "--framedrop=vo",          # drop late frames, never slow down
+        "--cache=no",              # no local buffer: play live edge only
+        "--demuxer-readahead-secs=0",
+        "--vd-lavc-threads=1",
+        "--network-timeout=10",
+        # auto-reconnect on stream drop
+        "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5",
+    ]
+    if url.startswith("rtsp://"):
+        cmd.append("--rtsp-transport=tcp")
 
-    def __init__(self, url: str, parent=None):
-        super().__init__(parent)
-        self._url = url
-        self._running = False
-        self._mutex = QMutex()
-        # Latest decoded frame, shared between capture loop and emit timer
-        self._frame_mutex = QMutex()
-        self._pending_frame: QImage | None = None
+    if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
+        # NUC / Intel Quick Sync: usa VAAPI sempre, anche in griglia.
+        # Quick Sync gestisce 8+ stream H.264 in parallelo con CPU minima.
+        # Nessuna limitazione di contesti GPU come sul Pi.
+        cmd.append("--hwdec=vaapi")
+    elif hw_decode:
+        # Raspberry Pi 5 V3D: HW decode solo in zoom (EGL per DMABuf import).
+        # GLX non può importare DMABuf → schermo blu senza gpu-context=x11egl.
+        cmd += ["--hwdec=auto-safe", "--gpu-context=x11egl"]
+    else:
+        # Raspberry Pi 5: SW decode in griglia (risparmia contesti GPU limitati).
+        cmd.append("--hwdec=no")
+    if url.startswith("srt://") and passphrase:
+        # mpv passes SRT options via the URL query string
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}passphrase={passphrase}&latency=500000"
+    cmd.append(url)
+    return cmd
 
-    def run(self):
-        self._running = True
-        os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
-        cap = cv2.VideoCapture(self._url, cv2.CAP_FFMPEG)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-        if not cap.isOpened():
-            self.error.emit("Impossibile aprire lo stream")
-            return
-
-        while True:
-            with QMutexLocker(self._mutex):
-                if not self._running:
-                    break
-            ret, frame = cap.read()
-            if not ret:
-                self.error.emit("Stream interrotto")
-                break
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            h, w, ch = rgb.shape
-            img = QImage(rgb.data, w, h, ch * w, QImage.Format.Format_RGB888).copy()
-            # Overwrite pending frame — older frames are dropped if UI hasn't consumed them yet
-            with QMutexLocker(self._frame_mutex):
-                self._pending_frame = img
-
-        cap.release()
-
-    def take_frame(self) -> QImage | None:
-        with QMutexLocker(self._frame_mutex):
-            frame = self._pending_frame
-            self._pending_frame = None
-            return frame
-
-    def stop(self):
-        with QMutexLocker(self._mutex):
-            self._running = False
-        self.wait(3000)
-
-
-# ─── Widget telecamera ───────────────────────────────────────────────────────
 
 class CameraWidget(QWidget):
     clicked = Signal(object)
@@ -94,26 +90,24 @@ class CameraWidget(QWidget):
         camera_config: dict,
         reconnect_delay_ms: int = 5000,
         startup_delay_ms: int = 0,
-        render_fps: int = _DEFAULT_FPS,
+        render_fps: int = _DEFAULT_FPS,  # API compat, unused
         parent=None,
     ):
         super().__init__(parent)
         self.camera_config = camera_config
-        self.reconnect_delay_ms = reconnect_delay_ms
+        self._reconnect_delay_ms = reconnect_delay_ms
         self._startup_delay_ms = startup_delay_ms
+        self._proc: subprocess.Popen | None = None
         self._started = False
-        self._thread: _StreamThread | None = None
+        self._hw_decode = False  # SW decode in grid; HW when focused/fullscreen
 
+        # Native X11 window so winId() is a real XID for mpv --wid.
+        self.setAttribute(Qt.WA_NativeWindow)
+        self.setAttribute(Qt.WA_OpaquePaintEvent)
+        self.setStyleSheet("background-color: #0d0d0d;")
         self.setMinimumSize(160, 90)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setStyleSheet("background-color: #0d0d0d;")
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-
-        self._video = _VideoWidget(self)
-        layout.addWidget(self._video)
+        self.setCursor(QCursor(Qt.PointingHandCursor))
 
         self._name_label = QLabel(camera_config.get("name", ""), self)
         self._name_label.setStyleSheet(
@@ -125,20 +119,25 @@ class CameraWidget(QWidget):
 
         self._status_label = QLabel("In attesa...", self)
         self._status_label.setAlignment(Qt.AlignCenter)
-        self._status_label.setStyleSheet("color: #555; font-size: 13px; background: transparent;")
+        self._status_label.setStyleSheet(
+            "color: #888; font-size: 13px; background: transparent;"
+        )
         self._status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
-        self.setCursor(QCursor(Qt.PointingHandCursor))
-
+        # Timer di riconnessione: usato da _check_process per ritardare il
+        # restart dopo un drop dello stream. Named timer (non singleShot anonimo)
+        # così stop() può cancellarlo (es. durante zoom).
         self._reconnect_timer = QTimer(self)
         self._reconnect_timer.setSingleShot(True)
-        self._reconnect_timer.setInterval(reconnect_delay_ms)
+        self._reconnect_timer.setInterval(self._reconnect_delay_ms)
         self._reconnect_timer.timeout.connect(self._start_stream)
 
-        # UI refresh timer — pulls latest frame at TARGET_FPS, drops the rest
-        self._render_timer = QTimer(self)
-        self._render_timer.setInterval(1000 // max(1, render_fps))
-        self._render_timer.timeout.connect(self._pull_frame)
+        # Polls the mpv process; restarts it if it exits (stream drop).
+        self._watchdog = QTimer(self)
+        self._watchdog.setInterval(2000)
+        self._watchdog.timeout.connect(self._check_process)
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -149,69 +148,108 @@ class CameraWidget(QWidget):
             else:
                 self._start_stream()
 
+    def closeEvent(self, event):
+        self.stop()
+        super().closeEvent(event)
+
+    # ── mpv process ─────────────────────────────────────────────────────────────
+
     def _start_stream(self):
         url = self.camera_config.get("url", "").strip()
         if not url:
             self._status_label.setText("Nessun URL")
-            self._status_label.setGeometry(0, 0, self.width(), self.height())
+            self._status_label.show()
             return
+
         self._status_label.setText("Connessione...")
         self._status_label.show()
         self._status_label.setGeometry(0, 0, self.width(), self.height())
-        self._thread = _StreamThread(url, self)
-        self._thread.error.connect(self._on_error)
-        self._thread.finished.connect(self._on_thread_finished)
-        self._thread.start()
-        self._render_timer.start()
 
-    def _pull_frame(self):
-        if self._thread is None:
-            return
-        img = self._thread.take_frame()
-        if img is not None:
-            if self._status_label.isVisible():
-                self._status_label.hide()
-            self._video.set_frame(img)
+        self._kill_proc()
 
-    def _on_error(self, message: str):
-        self._status_label.setText(f"{message} — riconnessione...")
-        self._status_label.show()
-        self._status_label.setGeometry(0, 0, self.width(), self.height())
+        passphrase = self.camera_config.get("passphrase", "").strip()
+        cmd = _mpv_command(url, int(self.winId()), passphrase, self._hw_decode)
 
-    def _on_thread_finished(self):
-        self._render_timer.stop()
-        if not self._reconnect_timer.isActive():
+        # New session so we can kill the whole mpv process group cleanly.
+        self._proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        # mpv paints over the widget once it has the first frame.
+        QTimer.singleShot(1500, self._status_label.hide)
+        self._watchdog.start()
+
+    def _check_process(self):
+        """Restart mpv if it exited (stream dropped / network error)."""
+        if self._proc is not None and self._proc.poll() is not None:
+            self._proc = None
+            self._status_label.setText("Riconnessione...")
+            self._status_label.show()
+            self._status_label.setGeometry(0, 0, self.width(), self.height())
+            self._watchdog.stop()
+            # Use self._reconnect_timer (a named QTimer that stop() can cancel).
+            # DO NOT use QTimer.singleShot — those anonymous timers cannot be
+            # cancelled by stop(), causing cameras to restart after zoom.
+            # Lazy init: crea il timer se __init__ non l'ha fatto (race/pyc issue).
+            if not hasattr(self, '_reconnect_timer'):
+                self._reconnect_timer = QTimer(self)
+                self._reconnect_timer.setSingleShot(True)
+                self._reconnect_timer.setInterval(self._reconnect_delay_ms)
+                self._reconnect_timer.timeout.connect(self._start_stream)
             self._reconnect_timer.start()
+
+    def _kill_proc(self):
+        """Send SIGTERM and release the reference — do NOT block waiting.
+
+        Blocking wait() on 9 simultaneous kills freezes the Qt main thread
+        for up to 27s, causing timers to fire and cameras to restart.
+        The OS reaps the process; the 500ms zoom delay gives mpv time to die.
+        """
+        self._watchdog.stop()
+        if self._proc is not None:
+            try:
+                os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+            self._proc = None  # release reference; OS handles cleanup
+
+    # ── Public API (used by main.py) ──────────────────────────────────────────
+
+    def set_quality(self, high: bool):
+        """Switch between grid quality (SW decode) and focus quality (HW decode).
+
+        Called by grid_widget when the user clicks to zoom in/out. Always
+        starts the stream (even if stopped) with the new hwdec setting.
+        """
+        self._hw_decode = high
+        self._start_stream()  # always start, regardless of current proc state
+
+    def request_stop(self):
+        self._reconnect_timer.stop()
+        self._watchdog.stop()
+        self._kill_proc()
+
+    def wait_stop(self):
+        self._reconnect_timer.stop()
+        self._kill_proc()
+
+    def stop(self):
+        self._reconnect_timer.stop()
+        self._watchdog.stop()
+        self._kill_proc()
+
+    # ── Qt events ─────────────────────────────────────────────────────────────
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self.clicked.emit(self)
         super().mousePressEvent(event)
 
-    def request_stop(self):
-        """Signal the thread to stop without blocking. Call wait_stop() after."""
-        self._render_timer.stop()
-        self._reconnect_timer.stop()
-        if self._thread and self._thread.isRunning():
-            with QMutexLocker(self._thread._mutex):
-                self._thread._running = False
-
-    def wait_stop(self):
-        """Wait for the thread to finish after request_stop()."""
-        if self._thread:
-            self._thread.wait(3000)
-            self._thread = None
-
-    def stop(self):
-        self.request_stop()
-        self.wait_stop()
-
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._name_label.move(5, 5)
         self._name_label.raise_()
         self._status_label.setGeometry(0, 0, self.width(), self.height())
-
-    def closeEvent(self, event):
-        self.stop()
-        super().closeEvent(event)
+        # mpv tracks the embedding window size automatically via --wid.

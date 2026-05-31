@@ -1,0 +1,6 @@
+# Allow the provisioning web app (user pi) to run ONLY the cv-* helpers as root.
+# Install to /etc/sudoers.d/cv-helpers with mode 0440.
+pi ALL=(root) NOPASSWD: /usr/local/sbin/cv-vpn
+pi ALL=(root) NOPASSWD: /usr/local/sbin/cv-ovpn
+pi ALL=(root) NOPASSWD: /usr/local/sbin/cv-ap
+pi ALL=(root) NOPASSWD: /usr/local/sbin/cv-mode

@@ -1,0 +1,17 @@
+#!/bin/bash
+# cv-mode — privileged helper for mode transitions (reboot the device).
+# The force-setup flag itself is managed by the web app (user pi) in its own
+# config dir; only the reboot needs privilege.
+#
+# Usage: cv-mode reboot
+set -euo pipefail
+
+case "${1:-}" in
+  reboot)
+    systemctl reboot
+    ;;
+  *)
+    echo "usage: cv-mode reboot" >&2
+    exit 2
+    ;;
+esac

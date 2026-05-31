@@ -1,0 +1,71 @@
+#!/bin/bash
+# cv-vpn — privileged helper for WireGuard VPN management (split-tunnel).
+#
+# This is the ONLY component that runs as root (via a narrow sudoers rule).
+# The Flask web app calls it; it never writes to /etc/wireguard directly.
+#
+# Usage:
+#   cv-vpn install <iface>      # read .conf from stdin, write /etc/wireguard/<iface>.conf (0600)
+#   cv-vpn up <iface>           # wg-quick up <iface>
+#   cv-vpn down <iface>         # wg-quick down <iface>
+#   cv-vpn enable <iface>       # systemctl enable wg-quick@<iface> (autostart at boot)
+#   cv-vpn disable <iface>      # systemctl disable + down
+#   cv-vpn status <iface>       # wg show <iface> dump (machine readable)
+#   cv-vpn remove <iface>       # down + delete config
+set -euo pipefail
+
+WG_DIR=/etc/wireguard
+
+action="${1:-}"
+iface="${2:-}"
+
+# Validate interface name: only lowercase letters, digits, hyphen (no path tricks)
+if [[ ! "$iface" =~ ^[a-z0-9-]{1,15}$ ]]; then
+  echo "ERROR: invalid interface name" >&2
+  exit 2
+fi
+
+conf="$WG_DIR/$iface.conf"
+
+case "$action" in
+  install)
+    umask 077
+    mkdir -p "$WG_DIR"
+    chmod 700 "$WG_DIR"
+    cat > "$conf"            # config text comes from stdin
+    chmod 600 "$conf"
+    echo "OK installed $conf"
+    ;;
+  up)
+    wg-quick up "$iface"
+    ;;
+  down)
+    wg-quick down "$iface" 2>/dev/null || true
+    ;;
+  enable)
+    systemctl enable "wg-quick@$iface" >/dev/null 2>&1 || true
+    wg-quick up "$iface" 2>/dev/null || true
+    echo "OK enabled"
+    ;;
+  disable)
+    systemctl disable "wg-quick@$iface" >/dev/null 2>&1 || true
+    wg-quick down "$iface" 2>/dev/null || true
+    echo "OK disabled"
+    ;;
+  status)
+    wg show "$iface" dump 2>/dev/null || true
+    ;;
+  exists)
+    [[ -f "$conf" ]] && echo yes || echo no
+    ;;
+  remove)
+    systemctl disable "wg-quick@$iface" >/dev/null 2>&1 || true
+    wg-quick down "$iface" 2>/dev/null || true
+    rm -f "$conf"
+    echo "OK removed"
+    ;;
+  *)
+    echo "ERROR: unknown action '$action'" >&2
+    exit 2
+    ;;
+esac

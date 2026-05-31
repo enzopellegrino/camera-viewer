@@ -1,0 +1,66 @@
+#!/bin/bash
+# cv-ap — privileged helper to toggle the provisioning Access Point on wlan0.
+#
+# Uses NetworkManager's built-in AP + shared mode (DHCP/DNS/NAT via its own
+# dnsmasq). A captive-portal DNS hijack file makes every domain resolve to the
+# Pi, so phones/PCs auto-open the setup page.
+#
+# The AP runs on wlan0; ethernet (eth0) is untouched, so SSH stays alive.
+#
+# Usage: cv-ap {start|stop|status}
+set -euo pipefail
+
+AP_CON="cv-ap"
+AP_SSID="CameraViewer-Setup"
+AP_PSK="cameraviewer"
+AP_IFACE="wlan0"
+AP_IP="10.42.0.1"
+SHARED_DIR="/etc/NetworkManager/dnsmasq-shared.d"
+CAPTIVE_CONF="$SHARED_DIR/cv-captive.conf"
+
+case "${1:-}" in
+  start)
+    iw reg set IT 2>/dev/null || true
+
+    # Captive-portal DNS hijack: resolve everything to the AP IP.
+    mkdir -p "$SHARED_DIR"
+    {
+      echo "# Camera Viewer captive portal — resolve all names to the AP"
+      echo "address=/#/$AP_IP"
+    } > "$CAPTIVE_CONF"
+
+    # Create the AP connection profile once.
+    if ! nmcli -t -f NAME con show | grep -qx "$AP_CON"; then
+      nmcli con add type wifi ifname "$AP_IFACE" con-name "$AP_CON" \
+        autoconnect no ssid "$AP_SSID" >/dev/null
+      nmcli con modify "$AP_CON" 802-11-wireless.mode ap 802-11-wireless.band bg
+      nmcli con modify "$AP_CON" ipv4.method shared
+      nmcli con modify "$AP_CON" wifi-sec.key-mgmt wpa-psk wifi-sec.psk "$AP_PSK"
+    fi
+
+    # (Re)start so NM's dnsmasq picks up the captive hijack file.
+    nmcli con down "$AP_CON" >/dev/null 2>&1 || true
+    nmcli con up "$AP_CON" >/dev/null
+    echo "OK AP up ($AP_SSID @ $AP_IP)"
+    ;;
+
+  stop)
+    nmcli con down "$AP_CON" >/dev/null 2>&1 || true
+    rm -f "$CAPTIVE_CONF"
+    echo "OK AP down"
+    ;;
+
+  status)
+    # "activated" only — a stored-but-inactive profile must report inactive.
+    if nmcli -t -f GENERAL.STATE con show "$AP_CON" 2>/dev/null | grep -q activated; then
+      echo "active"
+    else
+      echo "inactive"
+    fi
+    ;;
+
+  *)
+    echo "usage: cv-ap {start|stop|status}" >&2
+    exit 2
+    ;;
+esac

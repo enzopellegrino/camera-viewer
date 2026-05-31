@@ -1,0 +1,123 @@
+:root {
+  --bg: #121212;
+  --panel: #1e1e1e;
+  --panel-2: #141414;
+  --border: #333;
+  --text: #e4e4e4;
+  --muted: #9a9a9a;
+  --accent: #0a84ff;
+  --accent-dark: #0066cc;
+  --ok: #30d158;
+  --err: #ff453a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.topbar h1 { font-size: 18px; margin: 0; font-weight: 600; }
+
+.status { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+.status .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--err); }
+.status--on .dot { background: var(--ok); }
+.status--on { color: var(--text); font-weight: 600; }
+.status--warn .dot { background: #f5a623; }
+.status--warn { color: var(--text); }
+
+.tabs { display: flex; background: var(--panel-2); border-bottom: 1px solid var(--border); }
+.tab {
+  flex: 1; padding: 13px 8px; background: none; border: none; color: var(--muted);
+  font-size: 14px; cursor: pointer; border-bottom: 2px solid transparent;
+}
+.tab.is-active { color: var(--text); border-bottom-color: var(--accent); }
+
+main { padding: 18px; max-width: 640px; margin: 0 auto; }
+.panel { display: none; }
+.panel.is-active { display: block; }
+
+h2 { font-size: 17px; margin: 4px 0 6px; }
+.hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+
+label { display: block; font-size: 13px; color: var(--muted); margin: 14px 0 6px; }
+
+input, select {
+  width: 100%; padding: 12px; font-size: 16px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--border); border-radius: 9px; outline: none;
+}
+input:focus, select:focus { border-color: var(--accent); }
+
+.btn {
+  padding: 12px 16px; font-size: 15px; border-radius: 9px; cursor: pointer;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+}
+.btn:active { transform: scale(0.98); }
+.btn--primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn--primary:active { background: var(--accent-dark); }
+.btn--block { width: 100%; margin-top: 16px; }
+
+.row { display: flex; gap: 10px; margin-top: 12px; }
+.row .btn { flex: 1; }
+
+.box { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 14px; }
+
+.seg { display: flex; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 4px; }
+.seg__btn { flex: 1; padding: 10px; background: none; border: none; color: var(--muted); border-radius: 7px; cursor: pointer; font-size: 14px; }
+.seg__btn.is-active { background: var(--accent); color: #fff; }
+
+.wifi-list, .cam-list { list-style: none; padding: 0; margin: 14px 0 0; }
+.wifi-list li, .cam-list li {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; margin-bottom: 8px; cursor: pointer;
+}
+.wifi-list .meta, .cam-list .meta { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+.cam-list .meta .url { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 60vw; }
+.wifi-list .sig { font-size: 12px; color: var(--muted); }
+.lock { opacity: 0.6; font-size: 13px; }
+
+.cam-actions { display: flex; gap: 8px; }
+.zoom-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 4px; }
+.zoom-btn { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 6px; font-size: 12px; color: var(--text); cursor: pointer; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zoom-btn:active, .zoom-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.icon-btn { background: none; border: none; font-size: 18px; cursor: pointer; padding: 4px 8px; }
+.icon-btn.del { color: var(--err); }
+.icon-btn.edit { color: var(--accent); }
+
+.wifi-connect { margin-top: 12px; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: #2a2a2a; color: #fff; padding: 12px 20px; border-radius: 24px;
+  font-size: 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); z-index: 100;
+  max-width: 90vw; text-align: center;
+}
+.toast--ok { background: #1d7a37; }
+.toast--err { background: #a8261d; }
+
+.empty { color: var(--muted); font-size: 14px; text-align: center; padding: 24px 0; }
+
+.vpn-detail { margin-top: 12px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+.vpn-info-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+.vpn-info-label { color: var(--muted); padding: 4px 12px 4px 0; white-space: nowrap; vertical-align: top; }
+.vpn-info-value { color: var(--text); padding: 4px 0; word-break: break-all; font-weight: 500; }
+input[type="file"] { padding: 9px; }
