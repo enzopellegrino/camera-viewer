@@ -83,9 +83,17 @@ class GridWidget(QWidget):
         target.setGeometry(0, 0, self.width(), self.height())
         target.raise_()
         target.show()
+        # Stop ALL streams immediately (including target).
+        # Set target to HW decode before starting it.
+        # Brief black → then HW starts fluid. No SW→HW switch visible.
+        from PySide6.QtCore import QTimer
         for w in self._widgets:
+            w.stop()
             if w is not target:
                 w.hide()
+        target._hw_decode = True
+        target._started = False   # allow showEvent path if needed
+        QTimer.singleShot(500, target._start_stream)
 
     def exit_single_cam(self):
         self._exit_single_cam_internal()
@@ -95,12 +103,15 @@ class GridWidget(QWidget):
             return
         target = self._single
         self._single = None
+        # Switch target back to SW decode and put it back in the grid.
+        target._hw_decode = False
         idx = self._widgets.index(target)
         row = idx // self._cols
         col = idx % self._cols
         self._grid.addWidget(target, row, col)
         for w in self._widgets:
             w.show()
+            w._start_stream()  # restart all (target in SW, others fresh)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

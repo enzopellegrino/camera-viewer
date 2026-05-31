@@ -15,12 +15,15 @@
 # Uses absolute paths (NOT $HOME): the labwc autostart environment may not
 # export HOME, which previously made the force-setup check fail.
 CFG_DIR="/home/pi/.config/camera-viewer"
-# GstVideoOverlay renders into a native X11 window (XID).
-# Run Qt in X11 mode via XWayland so winId() returns a valid XID.
+# Native X11 session (rpd-x via lightdm). No XWayland overhead.
+# mpv --vo=gpu works for all embedded windows on X11.
 export QT_QPA_PLATFORM=xcb
 export DISPLAY="${DISPLAY:-:0}"
-export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
+
+# Set monitor to 1080p@50Hz via xrandr (X11 session, not Wayland).
+# 50Hz = 2×25fps → no judder with 25fps camera streams.
+xrandr --output HDMI-1 --mode 1920x1080 --rate 50 2>/dev/null || true
 export CAMERA_VIEWER_CONFIG="$CFG_DIR/config.json"
 
 # Single-instance guard: if another supervisor already holds the lock, exit.

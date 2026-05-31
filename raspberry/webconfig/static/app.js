@@ -107,15 +107,21 @@ $("#wifi-connect-btn").addEventListener("click", async () => {
 });
 
 // ── Cameras ───────────────────────────────────────────────────────────────────
+let _activezoom = null;
+
 async function loadCameras() {
   const { data } = await api("/api/cameras");
   const list = $("#cam-list");
+  const zoomGrid = $("#zoom-buttons");
   list.innerHTML = "";
+  zoomGrid.innerHTML = "";
+
   if (!data.cameras || data.cameras.length === 0) {
     list.innerHTML = '<li class="empty">Nessuna telecamera configurata</li>';
     return;
   }
   data.cameras.forEach((c) => {
+    // Camera list
     const li = document.createElement("li");
     li.innerHTML = `<div class="meta"><span>${escapeHtml(c.name)}</span>
       <span class="url">${escapeHtml(c.url)}</span></div>
@@ -126,19 +132,53 @@ async function loadCameras() {
     li.querySelector(".edit").addEventListener("click", () => editCamera(c));
     li.querySelector(".del").addEventListener("click", () => deleteCamera(c));
     list.appendChild(li);
+
+    // Zoom button
+    const btn = document.createElement("button");
+    btn.className = "zoom-btn";
+    btn.textContent = c.name;
+    btn.dataset.id = c.id;
+    btn.addEventListener("click", async () => {
+      const isActive = _activezoom === c.id;
+      document.querySelectorAll(".zoom-btn").forEach(b => b.classList.remove("active"));
+      if (isActive) {
+        _activezoom = null;
+        await api("/api/viewer/zoom", { method: "POST", body: JSON.stringify({ camera_id: null }) });
+      } else {
+        _activezoom = c.id;
+        btn.classList.add("active");
+        await api("/api/viewer/zoom", { method: "POST", body: JSON.stringify({ camera_id: c.id }) });
+      }
+    });
+    zoomGrid.appendChild(btn);
   });
 }
 
 $("#cam-add").addEventListener("click", () => openCamForm());
+$("#zoom-grid-btn").addEventListener("click", async () => {
+  _activezoom = null;
+  document.querySelectorAll(".zoom-btn").forEach(b => b.classList.remove("active"));
+  await api("/api/viewer/zoom", { method: "POST", body: JSON.stringify({ camera_id: null }) });
+  toast("Griglia ripristinata", "ok");
+});
 $("#cam-cancel").addEventListener("click", () => { $("#cam-form").hidden = true; });
+
+function togglePassphraseField(url) {
+  const isSrt = (url || "").startsWith("srt://");
+  $("#cam-passphrase-row").hidden = !isSrt;
+}
 
 function openCamForm(cam) {
   $("#cam-id").value = cam ? cam.id : "";
   $("#cam-name").value = cam ? cam.name : "";
   $("#cam-url").value = cam ? cam.url : "rtsp://";
+  $("#cam-passphrase").value = cam ? (cam.passphrase || "") : "";
+  togglePassphraseField(cam ? cam.url : "");
   $("#cam-form").hidden = false;
   $("#cam-name").focus();
 }
+
+$("#cam-url").addEventListener("input", e => togglePassphraseField(e.target.value));
 
 function editCamera(c) { openCamForm(c); }
 
@@ -149,11 +189,14 @@ async function deleteCamera(c) {
 }
 
 $("#cam-save").addEventListener("click", async () => {
+  const url = $("#cam-url").value;
   const payload = {
     id: $("#cam-id").value || undefined,
     name: $("#cam-name").value,
-    url: $("#cam-url").value,
+    url,
   };
+  const passphrase = $("#cam-passphrase").value.trim();
+  if (url.startsWith("srt://") && passphrase) payload.passphrase = passphrase;
   const { ok, data } = await api("/api/cameras", {
     method: "POST", body: JSON.stringify(payload),
   });

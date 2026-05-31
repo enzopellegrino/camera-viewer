@@ -61,12 +61,22 @@
 
       <button id="cam-add" class="btn btn--primary btn--block">+ Aggiungi telecamera</button>
 
+      <hr style="border:none; border-top:1px solid var(--border); margin:24px 0" />
+      <h2>Controllo monitor</h2>
+      <p class="hint">Zoom su una telecamera — il monitor si aggiorna in tempo reale.</p>
+      <div id="zoom-buttons" class="zoom-grid"></div>
+      <button id="zoom-grid-btn" class="btn btn--block" style="margin-top:10px">⊞ Torna alla griglia</button>
+
       <div id="cam-form" class="box" hidden>
         <input type="hidden" id="cam-id" />
         <label>Nome</label>
         <input id="cam-name" type="text" placeholder="es. Ingresso principale" />
-        <label>URL RTSP</label>
-        <input id="cam-url" type="text" placeholder="rtsp://utente:password@192.168.1.x:554/stream" />
+        <label>URL stream (RTSP o SRT)</label>
+        <input id="cam-url" type="text" placeholder="rtsp://... oppure srt://host:porta" />
+        <div id="cam-passphrase-row" hidden>
+          <label>Passphrase SRT <span class="hint" style="display:inline">(opzionale)</span></label>
+          <input id="cam-passphrase" type="password" placeholder="passphrase di cifratura" autocomplete="off" />
+        </div>
         <div class="row">
           <button id="cam-save" class="btn btn--primary">Salva</button>
           <button id="cam-cancel" class="btn">Annulla</button>

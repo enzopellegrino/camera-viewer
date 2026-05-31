@@ -152,6 +152,9 @@ def upsert_camera(camera: dict) -> dict:
         "name": (camera.get("name") or "").strip(),
         "url": (camera.get("url") or "").strip(),
     }
+    passphrase = (camera.get("passphrase") or "").strip()
+    if passphrase:
+        entry["passphrase"] = passphrase
 
     def _apply(cfg):
         cameras = cfg["cameras"]

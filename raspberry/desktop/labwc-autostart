@@ -10,4 +10,10 @@
 # configured and no force-setup); in provisioning mode the normal desktop
 # stays visible for the captive portal.
 
+# Force 1080p@50Hz: 50Hz = 2×25fps → no judder with 25fps camera streams.
+# A 4K@30Hz panel causes structural judder regardless of CPU load.
+# Picks the first connected HDMI output dynamically.
+( OUT=$(wlr-randr 2>/dev/null | grep -oE "^HDMI-A-[0-9]+" | head -1); \
+  [ -n "$OUT" ] && wlr-randr --output "$OUT" --mode 1920x1080@50 ) &
+
 /home/pi/camera-viewer/raspberry/scripts/cv-viewer-launch &

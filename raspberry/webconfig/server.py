@@ -102,8 +102,8 @@ def api_cameras_upsert():
     url = (data.get("url") or "").strip()
     if not name:
         return jsonify({"ok": False, "message": "Il nome è obbligatorio"}), 400
-    if not url.lower().startswith("rtsp://"):
-        return jsonify({"ok": False, "message": "L'URL deve iniziare con rtsp://"}), 400
+    if not (url.lower().startswith("rtsp://") or url.lower().startswith("srt://")):
+        return jsonify({"ok": False, "message": "L'URL deve iniziare con rtsp:// o srt://"}), 400
     entry = store.upsert_camera(data)
     return jsonify({"ok": True, "camera": entry})
 
@@ -167,7 +167,7 @@ def api_restart_viewer():
 
     _time.sleep(1)  # give it time to exit cleanly
 
-    # Relaunch via cv-viewer-launch which handles the operational mode check
+    # Relaunch via cv-viewer-launch which handles the operational mode check.
     env = os.environ.copy()
     env.update({
         "DISPLAY": ":0",
@@ -184,6 +184,29 @@ def api_restart_viewer():
         start_new_session=True,
     )
     return jsonify({"ok": True, "message": "Viewer riavviato"})
+
+
+# ── API: Viewer remote control ────────────────────────────────────────────────
+
+_VIEWER_CMD_FILE = "/tmp/cv-viewer-cmd"
+
+
+@app.route("/api/viewer/zoom", methods=["POST"])
+def api_viewer_zoom():
+    """Zoom a specific camera on the monitor (portal remote control).
+
+    Body: {"camera_id": "<id>"}  → zoom that camera
+          {"camera_id": null}    → return to grid
+    """
+    data = request.get_json(force=True, silent=True) or {}
+    cam_id = data.get("camera_id")
+    cmd = f"zoom:{cam_id}" if cam_id else "grid"
+    try:
+        with open(_VIEWER_CMD_FILE, "w") as f:
+            f.write(cmd)
+        return jsonify({"ok": True, "cmd": cmd})
+    except OSError as e:
+        return jsonify({"ok": False, "message": str(e)}), 500
 
 
 # ── API: Wallpaper ────────────────────────────────────────────────────────────
