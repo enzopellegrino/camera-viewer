@@ -209,6 +209,60 @@ $("#cam-save").addEventListener("click", async () => {
   }
 });
 
+// ── Placeholder telecamera offline ───────────────────────────────────────────
+async function loadPlaceholder() {
+  const { data } = await api("/api/placeholder");
+  if (data && data.custom && data.url) {
+    const img = $("#placeholder-preview");
+    img.src = data.url + "?t=" + Date.now();
+    $("#placeholder-preview-box").hidden = false;
+  }
+}
+
+const placeholderFile = $("#placeholder-file");
+const placeholderApply = $("#placeholder-apply");
+const placeholderLabel = $("#placeholder-label");
+
+placeholderFile.addEventListener("change", () => {
+  const f = placeholderFile.files[0];
+  if (!f) return;
+  placeholderLabel.textContent = "🖼 " + f.name;
+  placeholderApply.disabled = false;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = $("#placeholder-preview");
+    img.src = e.target.result;
+    $("#placeholder-preview-box").hidden = false;
+  };
+  reader.readAsDataURL(f);
+});
+
+placeholderApply.addEventListener("click", async () => {
+  const f = placeholderFile.files[0];
+  if (!f) return;
+  placeholderApply.textContent = "Invio…";
+  placeholderApply.disabled = true;
+  const form = new FormData();
+  form.append("file", f);
+  const res = await fetch("/api/placeholder", { method: "POST", body: form });
+  const data = await res.json();
+  toast(data.message || (data.ok ? "Logo aggiornato" : "Errore"), data.ok ? "ok" : "err");
+  placeholderApply.textContent = "Applica logo";
+  placeholderApply.disabled = false;
+  if (data.ok) loadPlaceholder();
+});
+
+$("#placeholder-reset").addEventListener("click", async () => {
+  const { ok, data } = await api("/api/placeholder", { method: "DELETE" });
+  toast(data.message || (ok ? "Logo rimosso" : "Errore"), ok ? "ok" : "err");
+  if (ok) {
+    $("#placeholder-preview-box").hidden = true;
+    placeholderLabel.textContent = "📂 Scegli un'immagine (JPG, PNG, WEBP)";
+    placeholderFile.value = "";
+    placeholderApply.disabled = true;
+  }
+});
+
 // ── Wallpaper ─────────────────────────────────────────────────────────────────
 async function loadWallpaper() {
   const { data } = await api("/api/wallpaper");
@@ -482,5 +536,6 @@ refreshStatus();
 loadCameras();
 loadSettings();
 loadVpnStatus();
+loadPlaceholder();
 loadWallpaper();
 setInterval(refreshStatus, 8000);

@@ -21,7 +21,7 @@ import subprocess
 
 from PySide6.QtWidgets import QWidget, QLabel, QSizePolicy
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QCursor, QPixmap
 
 _DEFAULT_FPS = 25  # kept for main.py settings compatibility
 
@@ -124,6 +124,20 @@ class CameraWidget(QWidget):
         )
         self._status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
+        # Placeholder image — mostrata quando lo stream non è attivo.
+        # Path: stessa dir del config (CAMERA_VIEWER_CONFIG o ~/.config/camera-viewer/).
+        cfg_env = os.environ.get("CAMERA_VIEWER_CONFIG", "")
+        cfg_dir = os.path.dirname(cfg_env) if cfg_env else os.path.expanduser(
+            "~/.config/camera-viewer")
+        self._placeholder_path = os.path.join(cfg_dir, "placeholder.jpg")
+        self._placeholder_pixmap: QPixmap | None = None
+
+        self._placeholder_label = QLabel(self)
+        self._placeholder_label.setAlignment(Qt.AlignCenter)
+        self._placeholder_label.setStyleSheet("background: transparent;")
+        self._placeholder_label.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._placeholder_label.hide()
+
         # Timer di riconnessione: usato da _check_process per ritardare il
         # restart dopo un drop dello stream. Named timer (non singleShot anonimo)
         # così stop() può cancellarlo (es. durante zoom).
@@ -152,6 +166,38 @@ class CameraWidget(QWidget):
         self.stop()
         super().closeEvent(event)
 
+    # ── Placeholder image ─────────────────────────────────────────────────────
+
+    def _load_placeholder(self) -> None:
+        """Carica (o ricarica) il placeholder dal disco e aggiorna il label."""
+        if os.path.exists(self._placeholder_path):
+            px = QPixmap(self._placeholder_path)
+            if not px.isNull():
+                self._placeholder_pixmap = px
+                self._scale_placeholder()
+                return
+        self._placeholder_pixmap = None
+        self._placeholder_label.clear()
+
+    def _scale_placeholder(self) -> None:
+        """Ridimensiona il pixmap alla dimensione corrente del widget."""
+        if self._placeholder_pixmap and self.width() > 0 and self.height() > 0:
+            scaled = self._placeholder_pixmap.scaled(
+                self.width(), self.height(),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation,
+            )
+            self._placeholder_label.setPixmap(scaled)
+
+    def _show_placeholder(self) -> None:
+        self._load_placeholder()
+        self._placeholder_label.setGeometry(0, 0, self.width(), self.height())
+        self._placeholder_label.show()
+        self._placeholder_label.lower()   # dietro lo status text
+        self._status_label.raise_()
+
+    def _hide_placeholder(self) -> None:
+        self._placeholder_label.hide()
+
     # ── mpv process ─────────────────────────────────────────────────────────────
 
     def _start_stream(self):
@@ -159,11 +205,13 @@ class CameraWidget(QWidget):
         if not url:
             self._status_label.setText("Nessun URL")
             self._status_label.show()
+            self._show_placeholder()
             return
 
         self._status_label.setText("Connessione...")
         self._status_label.show()
         self._status_label.setGeometry(0, 0, self.width(), self.height())
+        self._show_placeholder()
 
         self._kill_proc()
 
@@ -179,6 +227,7 @@ class CameraWidget(QWidget):
         )
         # mpv paints over the widget once it has the first frame.
         QTimer.singleShot(1500, self._status_label.hide)
+        QTimer.singleShot(1500, self._hide_placeholder)
         self._watchdog.start()
 
     def _check_process(self):
@@ -188,6 +237,7 @@ class CameraWidget(QWidget):
             self._status_label.setText("Riconnessione...")
             self._status_label.show()
             self._status_label.setGeometry(0, 0, self.width(), self.height())
+            self._show_placeholder()
             self._watchdog.stop()
             # Use self._reconnect_timer (a named QTimer that stop() can cancel).
             # DO NOT use QTimer.singleShot — those anonymous timers cannot be
@@ -252,4 +302,6 @@ class CameraWidget(QWidget):
         self._name_label.move(5, 5)
         self._name_label.raise_()
         self._status_label.setGeometry(0, 0, self.width(), self.height())
+        self._placeholder_label.setGeometry(0, 0, self.width(), self.height())
+        self._scale_placeholder()
         # mpv tracks the embedding window size automatically via --wid.

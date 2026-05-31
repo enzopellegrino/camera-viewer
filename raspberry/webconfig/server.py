@@ -298,6 +298,50 @@ def api_wallpaper_delete():
     return jsonify({"ok": True, "message": "Sfondo ripristinato"})
 
 
+# ── API: Placeholder telecamera ───────────────────────────────────────────────
+
+_PLACEHOLDER_PATH = os.path.expanduser("~/.config/camera-viewer/placeholder.jpg")
+
+
+@app.route("/api/placeholder", methods=["GET"])
+def api_placeholder_get():
+    exists = os.path.exists(_PLACEHOLDER_PATH)
+    return jsonify({"ok": True, "custom": exists,
+                    "url": "/api/placeholder/image" if exists else None})
+
+
+@app.route("/api/placeholder/image", methods=["GET"])
+def api_placeholder_image():
+    if not os.path.exists(_PLACEHOLDER_PATH):
+        return "", 404
+    return send_from_directory(
+        os.path.dirname(_PLACEHOLDER_PATH),
+        os.path.basename(_PLACEHOLDER_PATH),
+    )
+
+
+@app.route("/api/placeholder", methods=["POST"])
+def api_placeholder_set():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"ok": False, "message": "Nessun file ricevuto"}), 400
+    ext = os.path.splitext(f.filename)[1].lower()
+    if ext not in _ALLOWED_EXTENSIONS:
+        return jsonify({"ok": False,
+                        "message": "Formato non supportato (usa JPG, PNG, WEBP)"}), 400
+    os.makedirs(os.path.dirname(_PLACEHOLDER_PATH), exist_ok=True)
+    # Salva sempre come .jpg per semplicità (il path è fisso)
+    f.save(_PLACEHOLDER_PATH)
+    return jsonify({"ok": True, "message": "Logo aggiornato. Apparirà alla prossima disconnessione."})
+
+
+@app.route("/api/placeholder", methods=["DELETE"])
+def api_placeholder_delete():
+    if os.path.exists(_PLACEHOLDER_PATH):
+        os.remove(_PLACEHOLDER_PATH)
+    return jsonify({"ok": True, "message": "Logo rimosso"})
+
+
 # ── API: VPN (WireGuard split-tunnel) ────────────────────────────────────────
 
 def _parse_subnets(value) -> list[str]:

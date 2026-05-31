@@ -193,6 +193,25 @@
 
       <hr style="border:none; border-top:1px solid var(--border); margin:24px 0" />
 
+      <h2>Logo telecamera offline</h2>
+      <p class="hint">Immagine mostrata in ogni riquadro quando la telecamera non è raggiungibile. Se non impostata, il riquadro rimane nero.</p>
+      <div id="placeholder-preview-box" hidden>
+        <img id="placeholder-preview" src="" alt="Logo attuale"
+             style="width:100%; border-radius:10px; margin-bottom:12px; object-fit:contain; max-height:140px; background:#111;" />
+      </div>
+      <div class="box" style="border-style:dashed; text-align:center; padding:24px;">
+        <label style="cursor:pointer; display:block;">
+          <span id="placeholder-label">📂 Scegli un'immagine (JPG, PNG, WEBP)</span>
+          <input id="placeholder-file" type="file" accept="image/*" style="display:none" />
+        </label>
+      </div>
+      <div class="row" style="margin-top:12px; gap:8px;">
+        <button id="placeholder-apply" class="btn btn--primary" style="flex:1" disabled>Applica logo</button>
+        <button id="placeholder-reset" class="btn" style="flex:0 0 auto">Rimuovi</button>
+      </div>
+
+      <hr style="border:none; border-top:1px solid var(--border); margin:24px 0" />
+
       <h2>Sfondo desktop</h2>
       <div id="wallpaper-preview-box" hidden>
         <img id="wallpaper-preview" src="" alt="Sfondo attuale"
