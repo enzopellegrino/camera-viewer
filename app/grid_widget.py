@@ -83,17 +83,24 @@ class GridWidget(QWidget):
         target.setGeometry(0, 0, self.width(), self.height())
         target.raise_()
         target.show()
-        # Stop ALL streams immediately (including target).
-        # Set target to HW decode before starting it.
-        # Brief black → then HW starts fluid. No SW→HW switch visible.
-        from PySide6.QtCore import QTimer
-        for w in self._widgets:
-            w.stop()
-            if w is not target:
-                w.hide()
-        target._hw_decode = True
-        target._started = False   # allow showEvent path if needed
-        QTimer.singleShot(500, target._start_stream)
+
+        import os
+        if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
+            # NUC / hardware potente: tieni tutti gli stream attivi.
+            # Riavvia solo la camera zoomata con HW decode (VAAPI) per qualità
+            # fullscreen ottimale. Attesa minima (~1s) invece di fermare tutto.
+            target.set_quality(high=True)
+        else:
+            # Raspberry Pi: GPU limitata, ferma tutto per liberare risorse.
+            # Brief black → poi HW decode riparte fluido.
+            from PySide6.QtCore import QTimer
+            for w in self._widgets:
+                w.stop()
+                if w is not target:
+                    w.hide()
+            target._hw_decode = True
+            target._started = False   # allow showEvent path if needed
+            QTimer.singleShot(500, target._start_stream)
 
     def exit_single_cam(self):
         self._exit_single_cam_internal()
@@ -103,15 +110,24 @@ class GridWidget(QWidget):
             return
         target = self._single
         self._single = None
-        # Switch target back to SW decode and put it back in the grid.
         target._hw_decode = False
         idx = self._widgets.index(target)
         row = idx // self._cols
         col = idx % self._cols
         self._grid.addWidget(target, row, col)
-        for w in self._widgets:
-            w.show()
-            w._start_stream()  # restart all (target in SW, others fresh)
+
+        import os
+        if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
+            # NUC: gli altri stream non si sono mai fermati.
+            # Riporta solo la camera zoomata in SW decode nella griglia.
+            target.set_quality(high=False)
+            for w in self._widgets:
+                w.show()
+        else:
+            # Pi: riavvia tutto da zero in SW decode.
+            for w in self._widgets:
+                w.show()
+                w._start_stream()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
