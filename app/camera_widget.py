@@ -124,6 +124,14 @@ class CameraWidget(QWidget):
         )
         self._status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
+        # Timer di riconnessione: usato da _check_process per ritardare il
+        # restart dopo un drop dello stream. Named timer (non singleShot anonimo)
+        # così stop() può cancellarlo (es. durante zoom).
+        self._reconnect_timer = QTimer(self)
+        self._reconnect_timer.setSingleShot(True)
+        self._reconnect_timer.setInterval(self._reconnect_delay_ms)
+        self._reconnect_timer.timeout.connect(self._start_stream)
+
         # Polls the mpv process; restarts it if it exits (stream drop).
         self._watchdog = QTimer(self)
         self._watchdog.setInterval(2000)
