@@ -78,28 +78,30 @@ class GridWidget(QWidget):
         if self._single is not None:
             return
         self._single = target
+
+        # Rimuove dal layout (ma NON cambia parent — setParent ricreerebbe
+        # la finestra X11, cambiando XID e facendo perdere l'embedding a mpv).
         self._grid.removeWidget(target)
-        target.setParent(self)
         target.setGeometry(0, 0, self.width(), self.height())
         target.raise_()
         target.show()
 
         import os
         if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
-            # NUC / hardware potente: tieni tutti gli stream attivi.
-            # Riavvia solo la camera zoomata con HW decode (VAAPI) per qualità
-            # fullscreen ottimale. Attesa minima (~1s) invece di fermare tutto.
-            target.set_quality(high=True)
+            # NUC: zoom puramente geometrico — nessun restart di mpv.
+            # mpv riceve ConfigureNotify e scala automaticamente alla nuova
+            # dimensione. Zero nero, istantaneo.
+            # Gli altri stream continuano a girare (coperti dal widget fullscreen).
+            pass
         else:
-            # Raspberry Pi: GPU limitata, ferma tutto per liberare risorse.
-            # Brief black → poi HW decode riparte fluido.
+            # Raspberry Pi: ferma tutto per liberare risorse GPU limitate.
             from PySide6.QtCore import QTimer
             for w in self._widgets:
                 w.stop()
                 if w is not target:
                     w.hide()
             target._hw_decode = True
-            target._started = False   # allow showEvent path if needed
+            target._started = False
             QTimer.singleShot(500, target._start_stream)
 
     def exit_single_cam(self):
@@ -118,9 +120,7 @@ class GridWidget(QWidget):
 
         import os
         if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
-            # NUC: gli altri stream non si sono mai fermati.
-            # Riporta solo la camera zoomata in SW decode nella griglia.
-            target.set_quality(high=False)
+            # NUC: mpv non si è mai fermato, torna nella griglia e si ridimensiona.
             for w in self._widgets:
                 w.show()
         else:
