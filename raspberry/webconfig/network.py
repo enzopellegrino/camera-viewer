@@ -66,30 +66,56 @@ def scan_wifi() -> list[dict]:
 def current_status() -> dict:
     """Report the active connection: type, ssid, ip, online."""
     result = {"type": None, "ssid": None, "ip": None, "online": False}
-    if not _has_nmcli():
-        return result
 
-    rc, out, _ = _run(
-        ["nmcli", "-t", "-f", "TYPE,STATE,CONNECTION,DEVICE", "dev", "status"]
-    )
-    if rc == 0:
-        for line in out.splitlines():
-            parts = _split_nmcli(line)
-            if len(parts) < 4:
-                continue
-            dtype, state, conn, device = parts[:4]
-            if state == "connected" and dtype in ("wifi", "ethernet"):
-                result["type"] = dtype
-                result["online"] = True
-                if dtype == "wifi":
-                    result["ssid"] = conn
-                ip = _device_ip(device)
-                if ip:
-                    result["ip"] = ip
-                if dtype == "ethernet":
-                    result["ssid"] = None  # ethernet has no SSID
-                    break  # prefer ethernet
+    # Try nmcli first (NetworkManager-managed interfaces)
+    if _has_nmcli():
+        rc, out, _ = _run(
+            ["nmcli", "-t", "-f", "TYPE,STATE,CONNECTION,DEVICE", "dev", "status"]
+        )
+        if rc == 0:
+            for line in out.splitlines():
+                parts = _split_nmcli(line)
+                if len(parts) < 4:
+                    continue
+                dtype, state, conn, device = parts[:4]
+                if state == "connected" and dtype in ("wifi", "ethernet"):
+                    result["type"] = dtype
+                    result["online"] = True
+                    if dtype == "wifi":
+                        result["ssid"] = conn
+                    ip = _device_ip(device)
+                    if ip:
+                        result["ip"] = ip
+                    if dtype == "ethernet":
+                        result["ssid"] = None  # ethernet has no SSID
+                        break  # prefer ethernet
+
+    # Fallback: use `ip` command for interfaces managed by networkd
+    # (e.g. on Ubuntu Server where NM reports them as "unmanaged")
+    if not result["online"]:
+        ip = _ip_fallback()
+        if ip:
+            result["online"] = True
+            result["type"] = "ethernet"
+            result["ip"] = ip
+
     return result
+
+
+def _ip_fallback() -> str | None:
+    """Get the first non-loopback IPv4 address via `ip addr` (networkd fallback)."""
+    try:
+        import re
+        rc, out, _ = _run(["ip", "-4", "addr", "show"])
+        if rc != 0:
+            return None
+        for line in out.splitlines():
+            m = re.search(r"inet\s+([\d.]+)/\d+", line)
+            if m and not m.group(1).startswith("127."):
+                return m.group(1)
+    except Exception:
+        pass
+    return None
 
 
 def _device_ip(device: str) -> str | None:
