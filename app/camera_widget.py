@@ -61,16 +61,18 @@ def _mpv_command(url: str, wid: int, passphrase: str = "", hw_decode: bool = Fal
     ]
     if url.startswith("rtsp://"):
         cmd.append("--rtsp-transport=tcp")
-    if hw_decode:
-        # HW decode backend: controlled by CV_HWDEC_BACKEND env var.
-        #   "vaapi"  → Intel NUC (VAAPI + GLX, no EGL context needed)
-        #   (unset)  → Raspberry Pi 5 V3D: needs EGL for DMABuf import
-        if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
-            cmd.append("--hwdec=vaapi")
-        else:
-            # Pi 5 V3D: GLX can't import DMABuf → use EGL context.
-            cmd += ["--hwdec=auto-safe", "--gpu-context=x11egl"]
+
+    if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
+        # NUC / Intel Quick Sync: usa VAAPI sempre, anche in griglia.
+        # Quick Sync gestisce 8+ stream H.264 in parallelo con CPU minima.
+        # Nessuna limitazione di contesti GPU come sul Pi.
+        cmd.append("--hwdec=vaapi")
+    elif hw_decode:
+        # Raspberry Pi 5 V3D: HW decode solo in zoom (EGL per DMABuf import).
+        # GLX non può importare DMABuf → schermo blu senza gpu-context=x11egl.
+        cmd += ["--hwdec=auto-safe", "--gpu-context=x11egl"]
     else:
+        # Raspberry Pi 5: SW decode in griglia (risparmia contesti GPU limitati).
         cmd.append("--hwdec=no")
     if url.startswith("srt://") and passphrase:
         # mpv passes SRT options via the URL query string
