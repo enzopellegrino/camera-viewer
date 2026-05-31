@@ -62,9 +62,14 @@ def _mpv_command(url: str, wid: int, passphrase: str = "", hw_decode: bool = Fal
     if url.startswith("rtsp://"):
         cmd.append("--rtsp-transport=tcp")
     if hw_decode:
-        # HW decode: use EGL context so DMABuf frames can be imported to GPU.
-        # GLX (default) can't import DMABuf → blue screen.
-        cmd += ["--hwdec=auto-safe", "--gpu-context=x11egl"]
+        # HW decode backend: controlled by CV_HWDEC_BACKEND env var.
+        #   "vaapi"  → Intel NUC (VAAPI + GLX, no EGL context needed)
+        #   (unset)  → Raspberry Pi 5 V3D: needs EGL for DMABuf import
+        if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
+            cmd.append("--hwdec=vaapi")
+        else:
+            # Pi 5 V3D: GLX can't import DMABuf → use EGL context.
+            cmd += ["--hwdec=auto-safe", "--gpu-context=x11egl"]
     else:
         cmd.append("--hwdec=no")
     if url.startswith("srt://") and passphrase:
