@@ -1,4 +1,5 @@
 import math
+import os
 from PySide6.QtWidgets import QWidget, QGridLayout
 from PySide6.QtCore import Signal
 from .camera_widget import CameraWidget
@@ -86,7 +87,6 @@ class GridWidget(QWidget):
         target.raise_()
         target.show()
 
-        import os
         if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
             # NUC: zoom puramente geometrico — nessun restart di mpv.
             # mpv riceve ConfigureNotify e scala automaticamente alla nuova
@@ -101,7 +101,6 @@ class GridWidget(QWidget):
                 if w is not target:
                     w.hide()
             target._hw_decode = True
-            target._started = False
             QTimer.singleShot(500, target._start_stream)
 
     def exit_single_cam(self):
@@ -118,7 +117,6 @@ class GridWidget(QWidget):
         col = idx % self._cols
         self._grid.addWidget(target, row, col)
 
-        import os
         if os.environ.get("CV_HWDEC_BACKEND") == "vaapi":
             # NUC: mpv non si è mai fermato, torna nella griglia e si ridimensiona.
             for w in self._widgets:

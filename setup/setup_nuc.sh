@@ -49,7 +49,7 @@ apt-get install -y \
 echo "[3/9] Clone repository..."
 cd /home/pi
 REPO_URL="https://github.com/enzopellegrino/camera-viewer.git"
-BRANCH="NOTICK-raspberry-provisioning-portal"
+BRANCH="main"
 
 if [ ! -d "camera-viewer" ]; then
     sudo -u pi git clone -b "$BRANCH" "$REPO_URL" camera-viewer

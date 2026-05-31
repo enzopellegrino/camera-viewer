@@ -24,8 +24,8 @@ export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
 # NUC / Intel Quick Sync: abilita VAAPI sempre (grid + zoom).
 # Su Pi questi restano non impostati → si usa hwdec=auto-safe+x11egl.
 # Possono essere sovrascritti dall'autostart del desktop (openbox/labwc).
-export CV_HWDEC_BACKEND="${CV_HWDEC_BACKEND:-}"
-export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME:-}"
+export CV_HWDEC_BACKEND="${CV_HWDEC_BACKEND-}"
+export LIBVA_DRIVER_NAME="${LIBVA_DRIVER_NAME-}"
 
 # Set monitor to 1080p@50Hz via xrandr (X11 session, not Wayland).
 # 50Hz = 2×25fps → no judder with 25fps camera streams.
