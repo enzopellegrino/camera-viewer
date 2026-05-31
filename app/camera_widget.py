@@ -192,6 +192,12 @@ class CameraWidget(QWidget):
             # Use self._reconnect_timer (a named QTimer that stop() can cancel).
             # DO NOT use QTimer.singleShot — those anonymous timers cannot be
             # cancelled by stop(), causing cameras to restart after zoom.
+            # Lazy init: crea il timer se __init__ non l'ha fatto (race/pyc issue).
+            if not hasattr(self, '_reconnect_timer'):
+                self._reconnect_timer = QTimer(self)
+                self._reconnect_timer.setSingleShot(True)
+                self._reconnect_timer.setInterval(self._reconnect_delay_ms)
+                self._reconnect_timer.timeout.connect(self._start_stream)
             self._reconnect_timer.start()
 
     def _kill_proc(self):
