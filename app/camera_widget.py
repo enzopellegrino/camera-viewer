@@ -280,10 +280,11 @@ class CameraWidget(QWidget):
 
     # ── Qt events ─────────────────────────────────────────────────────────────
 
-    def mousePressEvent(self, event):
+    def mouseDoubleClickEvent(self, event):
+        """Doppio click → zoom in/out (più intuitivo del singolo click)."""
         if event.button() == Qt.LeftButton:
             self.clicked.emit(self)
-        super().mousePressEvent(event)
+        super().mouseDoubleClickEvent(event)
 
     def paintEvent(self, event):
         """Disegna il placeholder logo quando lo stream non è attivo."""

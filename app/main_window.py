@@ -22,7 +22,7 @@ _SWITCHER_BTN = """
     QPushButton {
         background: rgba(255,255,255,12%); color: #ccd;
         border: 1px solid rgba(255,255,255,18%); border-radius: 16px;
-        padding: 0 18px; font-size: 13px; min-height: 32px; font-weight: 500;
+        padding: 0 18px; font-size: 13px; min-height: 34px; font-weight: 500;
     }
     QPushButton:hover { background: rgba(255,255,255,22%); color: #fff; }
     QPushButton:checked {
@@ -31,49 +31,69 @@ _SWITCHER_BTN = """
     }
 """
 
+_HINT_STYLE = "color: rgba(255,255,255,40%); font-size: 11px;"
+
 
 class SceneSwitcherBar(QWidget):
-    """Transparent overlay bar at the bottom showing available views.
+    """Overlay bar at the bottom showing available views.
 
-    Appears on mouse movement, auto-hides after 3 s of inactivity.
-    Only visible when there are 2+ screens configured.
+    Always visible as a thin 6-px strip (with small dots indicating views).
+    Expands to full height on any mouse movement over the main window.
+    Auto-collapses after 3 s of inactivity.
+    Only active when 2+ screens are configured.
     """
 
-    screen_requested = Signal(int)   # emits index of the requested screen
+    screen_requested = Signal(int)
 
-    _BAR_H = 58
+    _BAR_FULL = 60   # expanded height
+    _BAR_MINI = 6    # collapsed strip height
     _AUTO_HIDE_MS = 3000
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.setMouseTracking(True)
 
+        self._expanded = False
+        self._screens: list[dict] = []
+        self._active_idx = 0
+        self._buttons: list[QPushButton] = []
+
+        # Layout for the full-expanded state
         self._hbox = QHBoxLayout(self)
         self._hbox.setContentsMargins(20, 10, 20, 10)
         self._hbox.setSpacing(8)
         self._hbox.addStretch()
         self._hbox.addStretch()
 
-        self._buttons: list[QPushButton] = []
+        # "double-click to zoom" hint label
+        self._hint = QLabel("↕ trascina mouse qui per le viste  ·  doppio click su telecamera per zoom")
+        self._hint.setStyleSheet(_HINT_STYLE)
+        self._hint.setAlignment(Qt.AlignCenter)
+        self._hbox.insertWidget(1, self._hint)
 
-        self._hide_timer = QTimer(self)
-        self._hide_timer.setSingleShot(True)
-        self._hide_timer.setInterval(self._AUTO_HIDE_MS)
-        self._hide_timer.timeout.connect(self.hide)
+        self._collapse_timer = QTimer(self)
+        self._collapse_timer.setSingleShot(True)
+        self._collapse_timer.setInterval(self._AUTO_HIDE_MS)
+        self._collapse_timer.timeout.connect(self._collapse)
 
-        self.hide()
+        # Start collapsed but visible
+        self._set_expanded(False)
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def refresh(self, screens: list[dict], active_idx: int) -> None:
-        """Rebuild buttons to match current screens list."""
+        self._screens = screens
+        self._active_idx = active_idx
+
         for btn in self._buttons:
             self._hbox.removeWidget(btn)
             btn.deleteLater()
         self._buttons.clear()
 
-        insert_pos = 1  # after first stretch
+        # Remove hint label temporarily, rebuild, re-insert
+        self._hbox.removeWidget(self._hint)
+
+        insert_pos = 1
         for i, screen in enumerate(screens):
             name = screen.get("name", f"Vista {i + 1}")
             btn = QPushButton(name)
@@ -86,29 +106,76 @@ class SceneSwitcherBar(QWidget):
             self._buttons.append(btn)
             insert_pos += 1
 
-        self.setVisible(len(screens) >= 2)
+        # Add hint after buttons
+        self._hbox.insertWidget(insert_pos, self._hint)
+
+        # Only show if 2+ screens
+        has_multi = len(screens) >= 2
+        self.setVisible(has_multi)
+        if not has_multi:
+            return
+        self._set_expanded(False)   # start collapsed
 
     def set_active(self, idx: int) -> None:
+        self._active_idx = idx
         for i, btn in enumerate(self._buttons):
             btn.setChecked(i == idx)
 
-    def show_temporary(self) -> None:
-        """Show the bar and (re)start the auto-hide timer."""
-        if len(self._buttons) < 2:
+    def expand_temporarily(self) -> None:
+        """Show full-height bar and schedule collapse."""
+        if len(self._screens) < 2:
             return
-        self.show()
-        self.raise_()
-        self._hide_timer.start()
+        self._set_expanded(True)
+        self._collapse_timer.start()
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _collapse(self):
+        self._set_expanded(False)
+
+    def _set_expanded(self, expanded: bool):
+        self._expanded = expanded
+        h = self._BAR_FULL if expanded else self._BAR_MINI
+        # Resize keeping position (bottom of parent)
+        if self.parent():
+            pw = self.parent().width()
+            ph = self.parent().height()
+            self.setGeometry(0, ph - h, pw, h)
+        for btn in self._buttons:
+            btn.setVisible(expanded)
+        self._hint.setVisible(not expanded)
+        self.update()
 
     # ── Drawing ───────────────────────────────────────────────────────────────
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        # Semi-transparent dark gradient background
-        gradient_color = QColor(0, 0, 0, 200)
-        painter.fillRect(self.rect(), gradient_color)
+        if self._expanded:
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 210))
+        else:
+            # Thin strip: draw small dots for each view
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 140))
+            n = len(self._screens)
+            if n >= 2:
+                dot_r = 3
+                spacing = 12
+                total = n * (dot_r * 2) + (n - 1) * spacing
+                start_x = (self.width() - total) // 2
+                y = self._BAR_MINI // 2
+                for i in range(n):
+                    x = start_x + i * (dot_r * 2 + spacing) + dot_r
+                    if i == self._active_idx:
+                        painter.setBrush(QColor(79, 114, 247))
+                    else:
+                        painter.setBrush(QColor(255, 255, 255, 80))
+                    painter.setPen(Qt.NoPen)
+                    painter.drawEllipse(x - dot_r, y - dot_r, dot_r * 2, dot_r * 2)
         painter.end()
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        self.expand_temporarily()
 
 _BTN_BASE = """
     QPushButton {{
@@ -312,14 +379,14 @@ class MainWindow(QMainWindow):
         if n <= 1:
             return
         self._load_screen((self._current_idx - 1) % n)
-        self._switcher.show_temporary()
+        self._switcher.expand_temporarily()
 
     def _next_screen(self):
         n = len(self.config.screens)
         if n <= 1:
             return
         self._load_screen((self._current_idx + 1) % n)
-        self._switcher.show_temporary()
+        self._switcher.expand_temporarily()
 
     def _refresh_switcher(self):
         self._switcher.refresh(self.config.screens, self._current_idx)
@@ -445,19 +512,16 @@ class MainWindow(QMainWindow):
 
     def mouseMoveEvent(self, event):
         super().mouseMoveEvent(event)
-        # Show switcher only when mouse is in the lower 20% of the window
-        if event.position().y() > self.height() * 0.75:
-            self._switcher.show_temporary()
+        # Qualsiasi movimento espande la barra viste
+        self._switcher.expand_temporarily()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._position_switcher()
 
     def _position_switcher(self):
-        w = self.centralWidget().width()
-        h = self.centralWidget().height()
-        bh = SceneSwitcherBar._BAR_H
-        self._switcher.setGeometry(0, h - bh, w, bh)
+        # Let the bar reposition itself based on expanded state
+        self._switcher._set_expanded(self._switcher._expanded)
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
