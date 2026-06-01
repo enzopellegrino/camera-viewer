@@ -52,13 +52,7 @@ if [[ "$VM_STATE" != "running" ]]; then
 fi
 ok "VM Podman attiva"
 
-# Verifica che la VM monti la home directory
-# (Podman machine monta /Users automaticamente su macOS)
-VM_MOUNT=$(podman machine ssh "ls '$SCRIPT_DIR/setup/build_image_inside.sh' 2>/dev/null && echo OK || echo MISSING" 2>/dev/null || echo "MISSING")
-if [[ "$VM_MOUNT" != "OK" ]]; then
-    err "La VM Podman non può accedere a $SCRIPT_DIR\n  Verifica che la home directory sia montata nella VM."
-fi
-ok "File accessibili dalla VM"
+ok "VM Podman verificata"
 
 # ── Step 2: Prepara archivio app ─────────────────────────────────────────────
 step 2 "Creazione archivio app..."
@@ -71,15 +65,28 @@ tar czf "$APP_TGZ" \
 ok "App: $(ls -lh "$APP_TGZ" | awk '{print $5}')"
 
 # ── Step 3: Build dentro la VM Podman (loop device disponibili!) ──────────────
-step 3 "Build immagine nella VM Podman (~20-30 min)..."
-echo ""
-echo -e "  ${C}La VM Linux ha accesso diretto ai loop device.${E}"
-echo "  I log vengono mostrati in tempo reale:"
+step 3 "Copia file nella VM e avvio build (~20-30 min)..."
 echo ""
 
-# Esegui lo script di build DENTRO la VM (non in un container)
-# La VM è un sistema Linux reale con tutti i permessi necessari
-podman machine ssh "sudo bash '$SETUP_SCRIPT' '$VERSION' '$OUTPUT_DIR' '$APP_TGZ'"
+# Determina nome VM
+VM_NAME=$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 || echo "podman-machine-default")
+info() { echo -e "  ${C}→${E} $1"; }
+info "VM: $VM_NAME"
+
+# Copia file nella VM via scp
+info "Copia script di build nella VM..."
+podman machine scp "$SETUP_SCRIPT"  "${VM_NAME}:/tmp/build_image_inside.sh"
+podman machine scp "$APP_TGZ"       "${VM_NAME}:/tmp/camera-viewer-app.tar.gz"
+
+info "Avvio build (loop device disponibili nella VM Linux)..."
+echo ""
+
+# Esegui il build nella VM — output in tempo reale
+podman machine ssh -- "sudo bash /tmp/build_image_inside.sh '$VERSION' '/tmp/cv-output' '/tmp/camera-viewer-app.tar.gz'"
+
+# Copia il risultato dalla VM al Mac
+info "Copia immagine compressa dal Mac..."
+podman machine scp "${VM_NAME}:/tmp/cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
 
 # ── Step 4: Verifica ─────────────────────────────────────────────────────────
 step 4 "Verifica output..."
