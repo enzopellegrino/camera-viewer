@@ -1,0 +1,93 @@
+#!/bin/bash
+# cv-network-mode — Gestisce la modalità rete al boot.
+#
+# Se ethernet non è disponibile entro 30s, crea un hotspot WiFi
+# così il cliente può configurare la rete dal portale senza ethernet.
+#
+# Hotspot: Camera-Viewer (aperto, nessuna password)
+# IP portale in AP mode: http://10.42.0.1
+#
+set -euo pipefail
+
+LOG="/tmp/cv-network.log"
+AP_SSID="Camera-Viewer"
+AP_IP="10.42.0.1"
+WAIT_SECONDS=30
+
+log() { echo "[$(date '+%H:%M:%S')] $*" | tee -a "$LOG"; }
+
+has_ethernet() {
+    nmcli -t -f TYPE,STATE dev status 2>/dev/null | grep -q "ethernet:connected"
+}
+
+has_wifi() {
+    nmcli -t -f DEVICE,TYPE dev 2>/dev/null | grep -q ":wifi$"
+}
+
+log "Verifica connessione rete..."
+
+# Aspetta ethernet per WAIT_SECONDS secondi
+for i in $(seq 1 $WAIT_SECONDS); do
+    if has_ethernet; then
+        log "Ethernet connessa — modalità normale."
+        exit 0
+    fi
+    sleep 1
+done
+
+log "Nessun ethernet dopo ${WAIT_SECONDS}s."
+
+# Controlla se c'è WiFi disponibile
+if ! has_wifi; then
+    log "Nessuna interfaccia WiFi — impossibile creare hotspot."
+    exit 0
+fi
+
+WIFI_IF=$(nmcli -t -f DEVICE,TYPE dev 2>/dev/null | grep ":wifi$" | cut -d: -f1 | head -1)
+log "Interfaccia WiFi: $WIFI_IF"
+
+# Rimuovi hotspot precedente se esiste
+nmcli con delete "Camera-Viewer-AP" 2>/dev/null || true
+
+log "Avvio hotspot WiFi '$AP_SSID'..."
+
+# Crea hotspot aperto (nessuna password — il portale gestisce l'auth)
+nmcli con add type wifi ifname "$WIFI_IF" \
+    con-name "Camera-Viewer-AP" \
+    ssid "$AP_SSID" \
+    mode ap \
+    ipv4.method shared \
+    ipv4.addresses "${AP_IP}/24" \
+    wifi-sec.key-mgmt none 2>/dev/null || \
+# Fallback: usa nmcli hotspot (funziona su alcune versioni)
+nmcli dev wifi hotspot \
+    ifname "$WIFI_IF" \
+    ssid "$AP_SSID" 2>/dev/null
+
+nmcli con up "Camera-Viewer-AP" 2>/dev/null || true
+sleep 3
+
+# Configura il portale in modalità AP
+# Imposta PORTAL_HOST così le redirect captive portal puntano all'IP giusto
+mkdir -p /etc/systemd/system/camera-webconfig.service.d
+cat > /etc/systemd/system/camera-webconfig.service.d/ap-mode.conf << EOF
+[Service]
+Environment=PORTAL_HOST=${AP_IP}
+Environment=HOST=0.0.0.0
+Environment=PORT=80
+EOF
+
+# Redirects captive portal: iOS/Android aprono automaticamente il browser
+iptables -t nat -A PREROUTING -i "$WIFI_IF" -p tcp --dport 80 \
+    -j DNAT --to-destination ${AP_IP}:80 2>/dev/null || true
+iptables -t nat -A PREROUTING -i "$WIFI_IF" -p tcp --dport 443 \
+    -j DNAT --to-destination ${AP_IP}:80 2>/dev/null || true
+
+systemctl daemon-reload
+systemctl restart camera-webconfig
+
+log "Hotspot attivo: '$AP_SSID' → http://${AP_IP}"
+log "Connettiti alla rete WiFi '$AP_SSID' e apri http://${AP_IP}"
+
+# Scrivi stato AP per l'overlay su schermo
+echo "$AP_SSID|$AP_IP" > /tmp/cv-ap-mode

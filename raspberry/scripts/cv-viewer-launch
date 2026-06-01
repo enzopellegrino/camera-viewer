@@ -54,15 +54,33 @@ _show_ip_overlay() {
         [ -n "$ip" ] && break
         sleep 1
     done
-    [ -z "$ip" ] && ip="(rete non disponibile)"
 
-    # Mostra overlay con IP usando xterm (disponibile su tutti i sistemi X11)
-    xterm -T "Camera Viewer" \
-          -fa "Monospace" -fs 18 \
-          -bg "#0c0e18" -fg "#4f72f7" \
-          -geometry 55x8+0+0 \
-          -e bash -c "
-echo ''
+    # Controlla se siamo in modalità AP (nessun ethernet, hotspot attivo)
+    local ap_mode=""
+    if [ -f /tmp/cv-ap-mode ]; then
+        ap_mode=$(cat /tmp/cv-ap-mode)  # formato: SSID|IP
+    fi
+
+    local content
+    if [ -n "$ap_mode" ]; then
+        # Modalità hotspot WiFi
+        local ssid="${ap_mode%%|*}"
+        local ap_ip="${ap_mode##*|}"
+        content="echo ''
+echo '  ╔═══════════════════════════════════════════╗'
+echo '  ║   🎥  Camera Viewer v2.0                  ║'
+echo '  ╠═══════════════════════════════════════════╣'
+echo '  ║  📡 Nessun ethernet — Hotspot WiFi attivo  ║'
+echo '  ║                                           ║'
+echo '  ║   1. Connettiti al WiFi: ${ssid}       ║'
+echo '  ║   2. Apri:  http://${ap_ip}          ║'
+echo '  ║   3. Login: admin / admin                 ║'
+echo '  ║   4. Configura WiFi dal portale           ║'
+echo '  ╚═══════════════════════════════════════════╝'
+sleep 60"
+    elif [ -n "$ip" ]; then
+        # Modalità ethernet normale
+        content="echo ''
 echo '  ╔═══════════════════════════════════════════╗'
 echo '  ║   🎥  Camera Viewer v2.0                  ║'
 echo '  ║       di Enzo Pellegrino                  ║'
@@ -71,9 +89,17 @@ echo '  ║   Portale:  http://${ip}          ║'
 echo '  ║   Login:    admin / admin                 ║'
 echo '  ╚═══════════════════════════════════════════╝'
 echo ''
-echo '  (si chiude automaticamente in 10 secondi...)'
-sleep 10
-" &
+echo '  (si chiude in 10 secondi...)'
+sleep 10"
+    else
+        return  # Nessuna rete, non mostrare nulla
+    fi
+
+    xterm -T "Camera Viewer" \
+          -fa "Monospace" -fs 16 \
+          -bg "#0c0e18" -fg "#4f72f7" \
+          -geometry 55x10+0+0 \
+          -e bash -c "$content" &
 }
 
 # Mostra l'IP solo se non ci sono ancora telecamere configurate

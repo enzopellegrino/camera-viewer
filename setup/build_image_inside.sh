@@ -268,6 +268,18 @@ chmod +x /usr/local/bin/pcmanfm
         /etc/systemd/system/camera-webconfig.service && \
     systemctl enable camera-webconfig
 
+# Modalità rete: ethernet normale o hotspot WiFi se nessun ethernet
+[ -f raspberry/scripts/cv-network-mode ] && \
+    install -m 755 raspberry/scripts/cv-network-mode \
+        /usr/local/sbin/cv-network-mode
+[ -f raspberry/systemd/camera-network-mode.service ] && \
+    install -m 644 raspberry/systemd/camera-network-mode.service \
+        /etc/systemd/system/camera-network-mode.service && \
+    systemctl enable camera-network-mode
+
+# Installa iptables per captive portal redirect in AP mode
+apt-get install -y -q --no-install-recommends iptables 2>/dev/null || true
+
 # LightDM autologin
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf << 'EOF'

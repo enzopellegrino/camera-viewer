@@ -1,0 +1,14 @@
+[Unit]
+Description=Camera Viewer — Gestione Modalità Rete (Ethernet / WiFi AP)
+After=NetworkManager.service network.target
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cv-network-mode
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
