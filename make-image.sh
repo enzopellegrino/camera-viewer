@@ -102,15 +102,37 @@ scp "${SCP_OPTS[@]}" "$SETUP_SCRIPT" "${SSH_HOST}:/tmp/build_image_inside.sh"
 scp "${SCP_OPTS[@]}" "$APP_TGZ"      "${SSH_HOST}:/tmp/camera-viewer-app.tar.gz"
 ok "File copiati nella VM"
 
-info "Avvio build nella VM (loop device disponibili)..."
+info "Avvio container Ubuntu DENTRO la VM (loop device garantiti)..."
 echo ""
 
-# Esegui build — output in tempo reale
-ssh "${SSH_OPTS[@]}" "$SSH_HOST" \
-    "sudo bash /tmp/build_image_inside.sh '$VERSION' '/tmp/cv-output' '/tmp/camera-viewer-app.tar.gz'"
+# La VM è Fedora CoreOS — non ha apt-get.
+# Eseguiamo il container Ubuntu DENTRO la VM: lì i container hanno
+# accesso diretto ai loop device del kernel Linux reale.
+ssh "${SSH_OPTS[@]}" "$SSH_HOST" << SSHEOF
+set -e
+
+# Prepara directory
+sudo mkdir -p /tmp/cv-build /tmp/cv-output
+sudo cp /tmp/build_image_inside.sh /tmp/cv-build/
+sudo cp /tmp/camera-viewer-app.tar.gz /tmp/cv-output/
+sudo chmod 777 /tmp/cv-build /tmp/cv-output
+
+echo "→ Avvio container Ubuntu amd64 con accesso privilegiato..."
+
+# Container Ubuntu dentro la VM = loop device reali disponibili
+sudo podman run --rm --privileged \
+    --platform linux/amd64 \
+    -v /tmp/cv-build:/setup:z \
+    -v /tmp/cv-output:/output:z \
+    ubuntu:24.04 \
+    bash /setup/build_image_inside.sh "$VERSION" "/output" "/output/camera-viewer-app.tar.gz"
+
+echo "→ Build completato!"
+ls -lh /tmp/cv-output/
+SSHEOF
 
 # Copia immagine dalla VM al Mac
-info "Copia immagine compressa..."
+info "Copia immagine compressa dal Mac..."
 mkdir -p "$OUTPUT_DIR"
 scp "${SCP_OPTS[@]}" "${SSH_HOST}:/tmp/cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
 
