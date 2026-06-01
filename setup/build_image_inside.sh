@@ -37,10 +37,12 @@ echo ""
 log "Installazione strumenti build..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
-apt-get install -y -q \
+mkdir -p /var/cache/apt/archives
+apt-get install -y -q --no-install-recommends \
     debootstrap parted dosfstools e2fsprogs \
     grub-efi-amd64-bin grub-pc-bin grub2-common \
-    squashfs-tools xz-utils rsync
+    xz-utils rsync
+apt-get clean
 ok "Strumenti installati"
 
 # ── Crea immagine disco raw ───────────────────────────────────────────────────
@@ -129,34 +131,36 @@ echo "deb http://security.ubuntu.com/ubuntu noble-security main universe" >> /et
 apt-get update -q
 
 # Kernel e bootloader
-apt-get install -y -q linux-image-generic shim-signed grub-efi-amd64-signed
+apt-get install -y -q --no-install-recommends linux-image-generic shim-signed grub-efi-amd64-signed
+apt-get clean
 
 # Sistema base
-apt-get install -y -q \
+apt-get install -y -q --no-install-recommends \
     systemd systemd-sysv dbus udev \
     network-manager openssh-server \
     curl wget git ca-certificates \
     sudo locales tzdata
 
 # Display
-apt-get install -y -q \
+apt-get install -y -q --no-install-recommends \
     xorg openbox lightdm \
     libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 libxkbcommon-x11-0
 
 # Video
-apt-get install -y -q mpv \
+apt-get install -y -q --no-install-recommends mpv \
     i965-va-driver intel-media-va-driver \
     mesa-va-drivers vainfo libva-drm2 libva-x11-2
 
 # Python e Flask
-apt-get install -y -q \
+apt-get install -y -q --no-install-recommends \
     python3-pip python3-venv python3-dev python3-flask
+apt-get clean
 
 # VPN
-apt-get install -y -q openvpn wireguard-tools
+apt-get install -y -q --no-install-recommends openvpn wireguard-tools
 
 # Utilities
-apt-get install -y -q \
+apt-get install -y -q --no-install-recommends \
     unclutter x11-xserver-utils feh \
     pciutils net-tools iproute2 \
     htop nano

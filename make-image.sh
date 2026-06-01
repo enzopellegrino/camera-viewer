@@ -139,6 +139,7 @@ sudo podman run --rm --privileged \
     -v /dev:/dev \
     -v "\$CV_BUILD_DIR":/setup:z \
     -v "\$CV_OUT_DIR":/output:z \
+    -v "\$CV_OUT_DIR/apt-cache":/var/cache/apt:z \
     ubuntu:24.04 \
     bash /setup/build_image_inside.sh "$VERSION" "/output" "/output/camera-viewer-app.tar.gz"
 
