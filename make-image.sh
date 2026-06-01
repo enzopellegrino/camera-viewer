@@ -56,78 +56,83 @@ if [[ "${1:-}" == "--repair-grub" ]]; then
         "sudo rm -rf \$HOME/cv-output 2>/dev/null; mkdir -p \$HOME/cv-output"
     scp "${SCP_OPTS[@]}" "$OUTPUT_IMG" "${SSH_HOST}:cv-output/"
 
-    echo "[2/4] Decomprimi e ripara GRUB nella VM..."
+    echo "[2/4] Decomprimi e ripara GRUB nella VM (via container Ubuntu)..."
     ssh "${SSH_OPTS[@]}" "$SSH_HOST" << REPAIREOF
 set -e
 sudo modprobe loop max_loop=16 2>/dev/null || true
+for i in \$(seq 0 15); do [ -b "/dev/loop\$i" ] || sudo mknod "/dev/loop\$i" b 7 "\$i" 2>/dev/null || true; done
 cd \$HOME/cv-output/
 
-# Decomprimi se non esiste già il raw
 IMG_RAW="camera-viewer-v${VERSION}.img"
 if [ ! -f "\$IMG_RAW" ]; then
     echo "Decomprimo immagine..."
     xz -d -k camera-viewer-v${VERSION}.img.xz
 fi
 
-# Monta immagine
 LOOP=\$(sudo losetup -f --show -P "\$IMG_RAW")
 echo "Loop: \$LOOP"
 sudo partprobe "\$LOOP" 2>/dev/null || true
-sleep 1
+sleep 2
 
-# Monta sistema
+# Monta le partizioni per il container
 sudo mkdir -p /mnt/cv-repair/boot/efi
 sudo mount \${LOOP}p2 /mnt/cv-repair
+sudo mkdir -p /mnt/cv-repair/boot/efi
 sudo mount \${LOOP}p1 /mnt/cv-repair/boot/efi
-for d in dev dev/pts proc sys run; do sudo mount --bind /\$d /mnt/cv-repair/\$d; done
 
-# Reinstalla GRUB fuori dal chroot (fix principale)
-sudo grub-install --target=x86_64-efi \
-    --efi-directory=/mnt/cv-repair/boot/efi \
-    --boot-directory=/mnt/cv-repair/boot \
-    --removable --recheck "\$LOOP" 2>&1 | tail -3
+# Esegui grub-install DENTRO un container Ubuntu (ha grub-install, Fedora CoreOS no)
+sudo podman run --rm --privileged \
+    --platform linux/amd64 \
+    -v /dev:/dev \
+    -v /mnt/cv-repair:/target:z \
+    ubuntu:24.04 bash -c "
+apt-get update -q && apt-get install -y -q --no-install-recommends grub-efi-amd64-bin grub-pc-bin grub2-common 2>&1 | tail -3
 
-# Aggiorna grub.cfg con kernel reale
-KERNEL=\$(ls /mnt/cv-repair/boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/mnt/cv-repair||')
-INITRD=\$(ls /mnt/cv-repair/boot/initrd.img-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/mnt/cv-repair||')
-echo "Kernel: \$KERNEL"
-sudo tee /mnt/cv-repair/boot/grub/grub.cfg > /dev/null << EOF
+grub-install --target=x86_64-efi \
+    --efi-directory=/target/boot/efi \
+    --boot-directory=/target/boot \
+    --removable --recheck /dev/\$(basename $LOOP) 2>&1 | tail -3
+
+KERNEL=\\\$(ls /target/boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
+INITRD=\\\$(ls /target/boot/initrd.img-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
+echo \"Kernel: \\\$KERNEL\"
+
+cat > /target/boot/grub/grub.cfg << 'GRUBCFG'
 set timeout=8
 set default=0
 set color_normal=cyan/black
 set color_highlight=black/cyan
 set menu_color_normal=white/black
 set menu_color_highlight=black/cyan
-echo "  Camera Viewer v${VERSION}"
-echo "  di Enzo Pellegrino"
-menuentry " Avvia Camera Viewer" {
+echo \"  Camera Viewer v${VERSION}\"
+echo \"  di Enzo Pellegrino\"
+menuentry \" Avvia Camera Viewer\" {
     search --no-floppy --label --set=root cv-system
-    linux  \${KERNEL} root=LABEL=cv-system rw quiet loglevel=3
-    initrd \${INITRD}
+    linux  \\\${KERNEL} root=LABEL=cv-system rw quiet loglevel=3
+    initrd \\\${INITRD}
 }
-menuentry " Modalita sicura (nomodeset)" {
+menuentry \" Modalita sicura (nomodeset)\" {
     search --no-floppy --label --set=root cv-system
-    linux  \${KERNEL} root=LABEL=cv-system rw nomodeset loglevel=3
-    initrd \${INITRD}
+    linux  \\\${KERNEL} root=LABEL=cv-system rw nomodeset loglevel=3
+    initrd \\\${INITRD}
 }
-EOF
+GRUBCFG
 
-# Copia il grub.cfg anche sulla EFI (dove GRUB lo cerca per primo al boot)
-sudo mkdir -p /mnt/cv-repair/boot/efi/EFI/BOOT
-sudo tee /mnt/cv-repair/boot/efi/EFI/BOOT/grub.cfg > /dev/null << EOF
-set prefix=(hd0,gpt2)/boot/grub
+# grub.cfg anche sulla partizione EFI (GRUB lo cerca li per primo)
+mkdir -p /target/boot/efi/EFI/BOOT
+cat > /target/boot/efi/EFI/BOOT/grub.cfg << 'EFICFG'
 insmod ext2
 insmod part_gpt
 search --no-floppy --label --set=root cv-system
+set prefix=(\\\$root)/boot/grub
 source /boot/grub/grub.cfg
-EOF
+EFICFG
+echo GRUB_OK
+"
 
-# Smonta
-for d in run sys proc dev/pts dev; do sudo umount /mnt/cv-repair/\$d 2>/dev/null || true; done
 sudo umount /mnt/cv-repair/boot/efi 2>/dev/null || true
 sudo umount /mnt/cv-repair 2>/dev/null || true
 sudo losetup -d "\$LOOP" 2>/dev/null || true
-
 echo "GRUB riparato!"
 REPAIREOF
 
