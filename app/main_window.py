@@ -248,13 +248,18 @@ class MainWindow(QMainWindow):
                             QTimer.singleShot(0, lambda widget=w: self._enter_single_cam(widget))
                         break
         elif cmd.startswith("screen:"):
-            # Switch to a named screen/view by id (from portal)
+            # Switch to a named screen/view by id (from portal).
+            # Reload config from disk first: portal may have added new screens
+            # that ConfigManager doesn't know about yet (it caches on startup).
+            self.config.load()
             screen_id = cmd[7:]
             screens = self.config.screens
             idx = next((i for i, s in enumerate(screens) if s.get("id") == screen_id), None)
             if idx is not None:
                 if self._single_cam_mode:
                     QTimer.singleShot(0, self._exit_single_cam)
+                # Rebuild toolbar so screen buttons reflect current screens
+                QTimer.singleShot(0, self._rebuild_toolbar)
                 QTimer.singleShot(0, lambda i=idx: self._load_screen(i))
 
     def _on_camera_clicked(self, widget):
