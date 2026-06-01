@@ -50,7 +50,10 @@ if [[ "${1:-}" == "--repair-grub" ]]; then
     SCP_OPTS=(-i "$SSH_KEY" -P "$SSH_PORT" -o StrictHostKeyChecking=no -o LogLevel=ERROR)
     SSH_HOST="${SSH_USER}@localhost"
 
-    echo "[1/4] Copia immagine compressa nella VM..."
+    echo "[1/4] Preparo directory nella VM e copio immagine..."
+    # Assicura che cv-output appartenga all'utente (non root dalla build precedente)
+    ssh "${SSH_OPTS[@]}" "$SSH_HOST" \
+        "sudo rm -rf \$HOME/cv-output 2>/dev/null; mkdir -p \$HOME/cv-output"
     scp "${SCP_OPTS[@]}" "$OUTPUT_IMG" "${SSH_HOST}:cv-output/"
 
     echo "[2/4] Decomprimi e ripara GRUB nella VM..."
