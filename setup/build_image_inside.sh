@@ -17,9 +17,9 @@ APP_TGZ="${3:-$OUTPUT_DIR/camera-viewer-app.tar.gz}"
 IMG_FILE="$OUTPUT_DIR/camera-viewer-v${VERSION}.img"
 
 mkdir -p "$OUTPUT_DIR"
-IMG_SIZE_MB=4096    # 4GB immagine raw (compressa xz → ~500MB)
+IMG_SIZE_MB=6144    # 6GB immagine raw (compressa xz → ~600MB)
 EFI_SIZE_MB=256     # EFI 256MB
-SYSTEM_SIZE_MB=3072 # Sistema 3GB (sufficiente per Ubuntu minimal + pacchetti)
+SYSTEM_SIZE_MB=5120 # Sistema 5GB (necessario per Ubuntu + PySide6 + pacchetti)
 # DATA occupa il resto (~768MB, espandibile dopo il primo avvio)
 
 log()  { echo -e "\n  \033[1m>>> $*\033[0m"; }
@@ -153,9 +153,11 @@ apt-get install -y -q --no-install-recommends mpv \
     i965-va-driver intel-media-va-driver \
     mesa-va-drivers vainfo libva-drm2 libva-x11-2
 
-# Python e Flask
+# Python — usa pacchetti apt dove possibile (evita pip + venv enormi)
 apt-get install -y -q --no-install-recommends \
-    python3-pip python3-venv python3-dev python3-flask
+    python3-pip python3-venv python3-dev python3-flask \
+    python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets \
+    python3-cryptography python3-pil
 apt-get clean
 
 # VPN
@@ -225,10 +227,12 @@ set -euo pipefail
 cd /home/pi/camera-viewer || exit 0
 
 # Python venv
-sudo -H -u pi python3 -m venv .venv
+# venv con --system-site-packages: usa PySide6/Flask da apt, pip solo per il resto
+sudo -H -u pi python3 -m venv --system-site-packages .venv
 sudo -H -u pi .venv/bin/pip install --upgrade pip -q
-sudo -H -u pi .venv/bin/pip install -r requirements.txt -q
-sudo -H -u pi .venv/bin/pip install flask -q
+# Installa solo ciò che non è disponibile via apt (cryptography, pillow già in apt)
+sudo -H -u pi .venv/bin/pip install --no-deps \
+    pyinstaller 2>/dev/null || true  # opzionale, ignora errori
 
 # Script di sistema
 [ -f raspberry/scripts/cv-mode ] && \
