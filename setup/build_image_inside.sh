@@ -72,6 +72,7 @@ mount "${LOOP}p3" /cv-data
 log "Debootstrap Ubuntu 24.04 minimal (richiede 5-10 min)..."
 debootstrap \
     --variant=minbase \
+    --arch=amd64 \
     --components=main,universe \
     noble /target \
     http://archive.ubuntu.com/ubuntu/

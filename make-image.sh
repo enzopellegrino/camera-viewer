@@ -76,6 +76,7 @@ echo "  (i log tecnici vengono mostrati durante il build)"
 echo ""
 
 podman run --rm --privileged \
+    --platform linux/amd64 \
     --name cv-image-builder \
     -v "$OUTPUT_DIR:/output:z" \
     -v "$SCRIPT_DIR/setup:/setup:ro,z" \
