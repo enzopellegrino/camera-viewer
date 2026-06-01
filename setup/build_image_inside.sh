@@ -408,15 +408,24 @@ ok "Camera Viewer configurato"
 
 # ── Installa GRUB EFI ─────────────────────────────────────────────────────────
 log "Installazione bootloader GRUB..."
-chroot /target /bin/bash << CHROOT
-grub-install --target=x86_64-efi \
-    --efi-directory=/boot/efi \
-    --boot-directory=/boot \
-    --removable \
-    --recheck 2>&1 | tail -3
 
-# grub.cfg brandizzato Camera Viewer
-cat > /boot/grub/grub.cfg << 'EOF'
+# grub-install VA eseguito FUORI dal chroot con il loop device reale
+# così può scrivere correttamente sull'EFI partition
+grub-install --target=x86_64-efi \
+    --efi-directory=/target/boot/efi \
+    --boot-directory=/target/boot \
+    --removable \
+    --recheck \
+    "$LOOP" 2>&1 | tail -3
+
+# Trova i file kernel reali (non i symlink che potrebbero non funzionare in GRUB)
+KERNEL=$(ls /target/boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
+INITRD=$(ls /target/boot/initrd.img-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
+info "Kernel: $KERNEL"
+info "Initrd: $INITRD"
+
+# grub.cfg brandizzato Camera Viewer con path reali del kernel
+cat > /target/boot/grub/grub.cfg << EOF
 set timeout=8
 set default=0
 
@@ -430,17 +439,21 @@ echo "  di Enzo Pellegrino"
 
 menuentry " Avvia Camera Viewer" {
     search --no-floppy --label --set=root cv-system
-    linux  /boot/vmlinuz root=LABEL=cv-system rw quiet splash
-    initrd /boot/initrd.img
+    linux  ${KERNEL} root=LABEL=cv-system rw quiet splash loglevel=3
+    initrd ${INITRD}
 }
-menuentry " Camera Viewer (modalità sicura)" {
+menuentry " Camera Viewer (modalita sicura, nomodeset)" {
     search --no-floppy --label --set=root cv-system
-    linux  /boot/vmlinuz root=LABEL=cv-system rw nomodeset
-    initrd /boot/initrd.img
+    linux  ${KERNEL} root=LABEL=cv-system rw nomodeset loglevel=3
+    initrd ${INITRD}
+}
+menuentry " Shell GRUB (debug)" {
+    terminal_input console
+    terminal_output console
 }
 EOF
-echo "GRUB installato."
-CHROOT
+
+info "grub.cfg scritto con kernel: $KERNEL"
 ok "GRUB installato"
 
 # ── Prepara partizione dati ───────────────────────────────────────────────────
