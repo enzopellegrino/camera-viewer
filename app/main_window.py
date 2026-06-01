@@ -1,8 +1,8 @@
 import os
 import platform
 from PySide6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QDialog, QMessageBox
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QKeySequence, QShortcut, QPainter, QColor, QFont
 
 from .config_manager import ConfigManager
 from .grid_widget import GridWidget, LAYOUTS
@@ -14,6 +14,101 @@ from .license_dialog import TrialBanner
 
 
 _TOOLBAR_STYLE = "background-color: #1a1a1a; border-bottom: 1px solid #2e2e2e;"
+
+
+# ── Scene Switcher Bar ────────────────────────────────────────────────────────
+
+_SWITCHER_BTN = """
+    QPushButton {
+        background: rgba(255,255,255,12%); color: #ccd;
+        border: 1px solid rgba(255,255,255,18%); border-radius: 16px;
+        padding: 0 18px; font-size: 13px; min-height: 32px; font-weight: 500;
+    }
+    QPushButton:hover { background: rgba(255,255,255,22%); color: #fff; }
+    QPushButton:checked {
+        background: #4f72f7; color: #fff;
+        border-color: #6888f9;
+    }
+"""
+
+
+class SceneSwitcherBar(QWidget):
+    """Transparent overlay bar at the bottom showing available views.
+
+    Appears on mouse movement, auto-hides after 3 s of inactivity.
+    Only visible when there are 2+ screens configured.
+    """
+
+    screen_requested = Signal(int)   # emits index of the requested screen
+
+    _BAR_H = 58
+    _AUTO_HIDE_MS = 3000
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self.setMouseTracking(True)
+
+        self._hbox = QHBoxLayout(self)
+        self._hbox.setContentsMargins(20, 10, 20, 10)
+        self._hbox.setSpacing(8)
+        self._hbox.addStretch()
+        self._hbox.addStretch()
+
+        self._buttons: list[QPushButton] = []
+
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.setInterval(self._AUTO_HIDE_MS)
+        self._hide_timer.timeout.connect(self.hide)
+
+        self.hide()
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def refresh(self, screens: list[dict], active_idx: int) -> None:
+        """Rebuild buttons to match current screens list."""
+        for btn in self._buttons:
+            self._hbox.removeWidget(btn)
+            btn.deleteLater()
+        self._buttons.clear()
+
+        insert_pos = 1  # after first stretch
+        for i, screen in enumerate(screens):
+            name = screen.get("name", f"Vista {i + 1}")
+            btn = QPushButton(name)
+            btn.setCheckable(True)
+            btn.setChecked(i == active_idx)
+            btn.setStyleSheet(_SWITCHER_BTN)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda _, idx=i: self.screen_requested.emit(idx))
+            self._hbox.insertWidget(insert_pos, btn)
+            self._buttons.append(btn)
+            insert_pos += 1
+
+        self.setVisible(len(screens) >= 2)
+
+    def set_active(self, idx: int) -> None:
+        for i, btn in enumerate(self._buttons):
+            btn.setChecked(i == idx)
+
+    def show_temporary(self) -> None:
+        """Show the bar and (re)start the auto-hide timer."""
+        if len(self._buttons) < 2:
+            return
+        self.show()
+        self.raise_()
+        self._hide_timer.start()
+
+    # ── Drawing ───────────────────────────────────────────────────────────────
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        # Semi-transparent dark gradient background
+        gradient_color = QColor(0, 0, 0, 200)
+        painter.fillRect(self.rect(), gradient_color)
+        painter.end()
 
 _BTN_BASE = """
     QPushButton {{
@@ -71,8 +166,16 @@ class MainWindow(QMainWindow):
             self.config.settings.get("render_fps", 30),
         )
         self._grid.camera_clicked.connect(self._on_camera_clicked)
+        self._grid.setMouseTracking(True)
         self._root_vbox.addWidget(self._grid, 1)
+
+        # Scene switcher bar — floats over the bottom of the grid
+        self._switcher = SceneSwitcherBar(root)
+        self._switcher.screen_requested.connect(self._load_screen)
+        self._switcher.raise_()
+
         self._start_cmd_watcher()
+        self._refresh_switcher()
 
     def _build_toolbar(self) -> QWidget:
         bar = QWidget()
@@ -184,6 +287,10 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Escape"), self, self._exit_fullscreen)
         QShortcut(QKeySequence("Q"), self, self.close)
 
+        # ← → to switch views + show switcher bar
+        QShortcut(QKeySequence(Qt.Key_Left),  self, self._prev_screen)
+        QShortcut(QKeySequence(Qt.Key_Right), self, self._next_screen)
+
         for i in range(min(9, len(self.config.screens))):
             QShortcut(QKeySequence(str(i + 1)), self, lambda idx=i: self._load_screen(idx))
 
@@ -198,6 +305,24 @@ class MainWindow(QMainWindow):
             return
         screen_cfg = self.config.screens[self._current_idx]
         self._grid.load_screen(screen_cfg, self.config.camera_lookup())
+        self._switcher.set_active(self._current_idx)
+
+    def _prev_screen(self):
+        n = len(self.config.screens)
+        if n <= 1:
+            return
+        self._load_screen((self._current_idx - 1) % n)
+        self._switcher.show_temporary()
+
+    def _next_screen(self):
+        n = len(self.config.screens)
+        if n <= 1:
+            return
+        self._load_screen((self._current_idx + 1) % n)
+        self._switcher.show_temporary()
+
+    def _refresh_switcher(self):
+        self._switcher.refresh(self.config.screens, self._current_idx)
 
     def _force_layout(self, layout: str):
         if not self.config.screens:
@@ -258,8 +383,9 @@ class MainWindow(QMainWindow):
             if idx is not None:
                 if self._single_cam_mode:
                     QTimer.singleShot(0, self._exit_single_cam)
-                # Rebuild toolbar so screen buttons reflect current screens
+                # Rebuild toolbar and switcher to reflect current screens
                 QTimer.singleShot(0, self._rebuild_toolbar)
+                QTimer.singleShot(0, self._refresh_switcher)
                 QTimer.singleShot(0, lambda i=idx: self._load_screen(i))
 
     def _on_camera_clicked(self, widget):
@@ -314,6 +440,24 @@ class MainWindow(QMainWindow):
         self._rebuild_toolbar()
 
     # ----------------------------------------------------------- fullscreen / kiosk
+
+    # ── Mouse / resize (scene switcher) ──────────────────────────────────────
+
+    def mouseMoveEvent(self, event):
+        super().mouseMoveEvent(event)
+        # Show switcher only when mouse is in the lower 20% of the window
+        if event.position().y() > self.height() * 0.75:
+            self._switcher.show_temporary()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._position_switcher()
+
+    def _position_switcher(self):
+        w = self.centralWidget().width()
+        h = self.centralWidget().height()
+        bh = SceneSwitcherBar._BAR_H
+        self._switcher.setGeometry(0, h - bh, w, bh)
 
     def toggle_fullscreen(self):
         if self.isFullScreen():
