@@ -56,7 +56,7 @@ if [[ "${1:-}" == "--repair-grub" ]]; then
         "sudo rm -rf \$HOME/cv-output 2>/dev/null; mkdir -p \$HOME/cv-output"
     scp "${SCP_OPTS[@]}" "$OUTPUT_IMG" "${SSH_HOST}:cv-output/"
 
-    echo "[2/4] Decomprimi e ripara GRUB nella VM (via container Ubuntu)..."
+    echo "[2/4] Ripara GRUB nella VM (grub-mkstandalone via container Ubuntu)..."
     ssh "${SSH_OPTS[@]}" "$SSH_HOST" << REPAIREOF
 set -e
 sudo modprobe loop max_loop=16 2>/dev/null || true
@@ -71,69 +71,63 @@ fi
 
 LOOP=\$(sudo losetup -f --show -P "\$IMG_RAW")
 echo "Loop: \$LOOP"
-sudo partprobe "\$LOOP" 2>/dev/null || true
-sleep 2
+sudo partprobe "\$LOOP" 2>/dev/null || true; sleep 2
 
-# Monta le partizioni per il container
 sudo mkdir -p /mnt/cv-repair/boot/efi
 sudo mount \${LOOP}p2 /mnt/cv-repair
-sudo mkdir -p /mnt/cv-repair/boot/efi
 sudo mount \${LOOP}p1 /mnt/cv-repair/boot/efi
 
-# Esegui grub-install DENTRO un container Ubuntu (ha grub-install, Fedora CoreOS no)
+# grub-mkstandalone nel container Ubuntu: crea EFI autocontenuto
 sudo podman run --rm --privileged \
     --platform linux/amd64 \
-    -v /dev:/dev \
     -v /mnt/cv-repair:/target:z \
     ubuntu:24.04 bash -c "
-apt-get update -q && apt-get install -y -q --no-install-recommends grub-efi-amd64-bin grub-pc-bin grub2-common 2>&1 | tail -3
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -q 2>/dev/null
+apt-get install -y -q --no-install-recommends grub-efi-amd64-bin 2>&1 | tail -2
 
-grub-install --target=x86_64-efi \
-    --efi-directory=/target/boot/efi \
-    --boot-directory=/target/boot \
-    --removable --recheck /dev/\$(basename $LOOP) 2>&1 | tail -3
+KERNEL=\$(ls /target/boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
+INITRD=\$(ls /target/boot/initrd.img-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
+echo Kernel: \$KERNEL
 
-KERNEL=\\\$(ls /target/boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
-INITRD=\\\$(ls /target/boot/initrd.img-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
-echo \"Kernel: \\\$KERNEL\"
-
-cat > /target/boot/grub/grub.cfg << 'GRUBCFG'
+cat > /tmp/grub.cfg << CFG
 set timeout=8
 set default=0
 set color_normal=cyan/black
 set color_highlight=black/cyan
 set menu_color_normal=white/black
 set menu_color_highlight=black/cyan
-echo \"  Camera Viewer v${VERSION}\"
-echo \"  di Enzo Pellegrino\"
-menuentry \" Avvia Camera Viewer\" {
+echo '  Camera Viewer v${VERSION}'
+echo '  di Enzo Pellegrino'
+menuentry ' Avvia Camera Viewer' {
     search --no-floppy --label --set=root cv-system
-    linux  \\\${KERNEL} root=LABEL=cv-system rw quiet loglevel=3
-    initrd \\\${INITRD}
+    linux  \$KERNEL root=LABEL=cv-system rw quiet loglevel=3
+    initrd \$INITRD
 }
-menuentry \" Modalita sicura (nomodeset)\" {
+menuentry ' Modalita sicura' {
     search --no-floppy --label --set=root cv-system
-    linux  \\\${KERNEL} root=LABEL=cv-system rw nomodeset loglevel=3
-    initrd \\\${INITRD}
+    linux  \$KERNEL root=LABEL=cv-system rw nomodeset loglevel=3
+    initrd \$INITRD
 }
-GRUBCFG
+CFG
 
-# grub.cfg anche sulla partizione EFI (GRUB lo cerca li per primo)
 mkdir -p /target/boot/efi/EFI/BOOT
-cat > /target/boot/efi/EFI/BOOT/grub.cfg << 'EFICFG'
-insmod ext2
-insmod part_gpt
-search --no-floppy --label --set=root cv-system
-set prefix=(\\\$root)/boot/grub
-source /boot/grub/grub.cfg
-EFICFG
+grub-mkstandalone \
+    --format=x86_64-efi \
+    --output=/target/boot/efi/EFI/BOOT/BOOTX64.EFI \
+    --modules='part_gpt part_msdos fat ext2 normal boot linux initrd search search_label echo all_video video_fb' \
+    --locales='' --fonts='' \
+    'boot/grub/grub.cfg=/tmp/grub.cfg'
+
+cp /tmp/grub.cfg /target/boot/grub/grub.cfg 2>/dev/null || true
+ls -lh /target/boot/efi/EFI/BOOT/BOOTX64.EFI
 echo GRUB_OK
 "
 
 sudo umount /mnt/cv-repair/boot/efi 2>/dev/null || true
 sudo umount /mnt/cv-repair 2>/dev/null || true
 sudo losetup -d "\$LOOP" 2>/dev/null || true
-echo "GRUB riparato!"
+echo "GRUB riparato con grub-mkstandalone!"
 REPAIREOF
 
     echo "[3/4] Ricomprimi immagine (veloce, xz -3)..."

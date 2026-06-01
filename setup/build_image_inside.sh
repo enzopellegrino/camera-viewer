@@ -406,29 +406,21 @@ echo "Camera Viewer configurato."
 CHROOT
 ok "Camera Viewer configurato"
 
-# ── Installa GRUB EFI ─────────────────────────────────────────────────────────
-log "Installazione bootloader GRUB..."
+# ── Installa GRUB EFI con grub-mkstandalone ───────────────────────────────────
+# grub-mkstandalone crea un singolo file EFI autocontenuto con grub.cfg
+# integrato dentro — nessun path esterno, funziona su qualsiasi hardware.
+log "Creazione bootloader GRUB autocontenuto..."
 
-# grub-install VA eseguito FUORI dal chroot con il loop device reale
-# così può scrivere correttamente sull'EFI partition
-grub-install --target=x86_64-efi \
-    --efi-directory=/target/boot/efi \
-    --boot-directory=/target/boot \
-    --removable \
-    --recheck \
-    "$LOOP" 2>&1 | tail -3
-
-# Trova i file kernel reali (non i symlink che potrebbero non funzionare in GRUB)
+# Trova kernel e initrd reali
 KERNEL=$(ls /target/boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
 INITRD=$(ls /target/boot/initrd.img-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
 info "Kernel: $KERNEL"
 info "Initrd: $INITRD"
 
-# grub.cfg brandizzato Camera Viewer con path reali del kernel
-cat > /target/boot/grub/grub.cfg << EOF
+# grub.cfg con kernel reale
+cat > /tmp/grub-standalone.cfg << EOF
 set timeout=8
 set default=0
-
 set color_normal=cyan/black
 set color_highlight=black/cyan
 set menu_color_normal=white/black
@@ -439,37 +431,31 @@ echo "  di Enzo Pellegrino"
 
 menuentry " Avvia Camera Viewer" {
     search --no-floppy --label --set=root cv-system
-    linux  ${KERNEL} root=LABEL=cv-system rw quiet splash loglevel=3
+    linux  ${KERNEL} root=LABEL=cv-system rw quiet loglevel=3
     initrd ${INITRD}
 }
-menuentry " Camera Viewer (modalita sicura, nomodeset)" {
+menuentry " Modalita sicura (nomodeset)" {
     search --no-floppy --label --set=root cv-system
     linux  ${KERNEL} root=LABEL=cv-system rw nomodeset loglevel=3
     initrd ${INITRD}
 }
-menuentry " Shell GRUB (debug)" {
-    terminal_input console
-    terminal_output console
-}
 EOF
 
-# Copia anche il grub.cfg sulla partizione EFI (dove GRUB cerca per primo)
-# Questo risolve il problema del GRUB shell invece del menu
+# Crea EFI binary autocontenuto — tutto integrato, nessuna dipendenza esterna
 mkdir -p /target/boot/efi/EFI/BOOT
-cp /target/boot/grub/grub.cfg /target/boot/efi/EFI/BOOT/grub.cfg
-# Imposta il prefisso corretto nel grub.cfg sulla EFI
-cat > /target/boot/efi/EFI/BOOT/grub.cfg << EFIEOF
-# Cerca e carica il grub.cfg dal filesystem di sistema
-set prefix=(hd0,gpt2)/boot/grub
-insmod ext2
-insmod part_gpt
-search --no-floppy --label --set=root cv-system
-source /boot/grub/grub.cfg
-EFIEOF
+grub-mkstandalone \
+    --format=x86_64-efi \
+    --output=/target/boot/efi/EFI/BOOT/BOOTX64.EFI \
+    --modules="part_gpt part_msdos fat ext2 normal boot linux initrd search search_label echo all_video video_fb" \
+    --locales="" \
+    --fonts="" \
+    "boot/grub/grub.cfg=/tmp/grub-standalone.cfg"
 
-info "grub.cfg scritto con kernel: $KERNEL"
-info "grub.cfg copiato anche su EFI partition"
-ok "GRUB installato"
+# Copia anche il grub.cfg sulla partizione di sistema (per aggiornamenti futuri)
+mkdir -p /target/boot/grub
+cp /tmp/grub-standalone.cfg /target/boot/grub/grub.cfg
+
+ok "GRUB autocontenuto creato: $(ls -lh /target/boot/efi/EFI/BOOT/BOOTX64.EFI | awk '{print $5}')"
 
 # ── Prepara partizione dati ───────────────────────────────────────────────────
 log "Configurazione partizione dati persistenti..."
