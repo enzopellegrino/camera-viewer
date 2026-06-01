@@ -77,6 +77,9 @@ echo ""
 
 podman run --rm --privileged \
     --platform linux/amd64 \
+    --security-opt seccomp=unconfined \
+    --security-opt apparmor=unconfined \
+    --cap-add SYS_ADMIN,MKNOD,NET_ADMIN \
     --name cv-image-builder \
     -v "$OUTPUT_DIR:/output:z" \
     -v "$SCRIPT_DIR/setup:/setup:ro,z" \
