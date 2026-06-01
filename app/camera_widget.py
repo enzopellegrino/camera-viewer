@@ -117,10 +117,11 @@ class CameraWidget(QWidget):
         self._name_label.adjustSize()
         self._name_label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
-        self._status_label = QLabel("In attesa...", self)
-        self._status_label.setAlignment(Qt.AlignCenter)
+        self._status_label = QLabel("", self)
+        self._status_label.setAlignment(Qt.AlignCenter | Qt.AlignBottom)
         self._status_label.setStyleSheet(
-            "color: #888; font-size: 13px; background: transparent;"
+            "color: rgba(255,255,255,160); font-size: 11px; background: transparent;"
+            "padding-bottom: 6px;"
         )
         self._status_label.setAttribute(Qt.WA_TransparentForMouseEvents)
 
@@ -189,8 +190,8 @@ class CameraWidget(QWidget):
     def _start_stream(self):
         url = self.camera_config.get("url", "").strip()
         if not url:
-            self._status_label.setText("Nessun URL")
-            self._status_label.show()
+            # Riquadro senza telecamera: mostra solo il logo, nessun testo.
+            self._status_label.hide()
             self._show_placeholder()
             return
 
