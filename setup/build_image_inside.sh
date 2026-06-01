@@ -453,7 +453,22 @@ menuentry " Shell GRUB (debug)" {
 }
 EOF
 
+# Copia anche il grub.cfg sulla partizione EFI (dove GRUB cerca per primo)
+# Questo risolve il problema del GRUB shell invece del menu
+mkdir -p /target/boot/efi/EFI/BOOT
+cp /target/boot/grub/grub.cfg /target/boot/efi/EFI/BOOT/grub.cfg
+# Imposta il prefisso corretto nel grub.cfg sulla EFI
+cat > /target/boot/efi/EFI/BOOT/grub.cfg << EFIEOF
+# Cerca e carica il grub.cfg dal filesystem di sistema
+set prefix=(hd0,gpt2)/boot/grub
+insmod ext2
+insmod part_gpt
+search --no-floppy --label --set=root cv-system
+source /boot/grub/grub.cfg
+EFIEOF
+
 info "grub.cfg scritto con kernel: $KERNEL"
+info "grub.cfg copiato anche su EFI partition"
 ok "GRUB installato"
 
 # ── Prepara partizione dati ───────────────────────────────────────────────────

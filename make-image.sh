@@ -112,6 +112,16 @@ menuentry " Modalita sicura (nomodeset)" {
 }
 EOF
 
+# Copia il grub.cfg anche sulla EFI (dove GRUB lo cerca per primo al boot)
+sudo mkdir -p /mnt/cv-repair/boot/efi/EFI/BOOT
+sudo tee /mnt/cv-repair/boot/efi/EFI/BOOT/grub.cfg > /dev/null << EOF
+set prefix=(hd0,gpt2)/boot/grub
+insmod ext2
+insmod part_gpt
+search --no-floppy --label --set=root cv-system
+source /boot/grub/grub.cfg
+EOF
+
 # Smonta
 for d in run sys proc dev/pts dev; do sudo umount /mnt/cv-repair/\$d 2>/dev/null || true; done
 sudo umount /mnt/cv-repair/boot/efi 2>/dev/null || true
