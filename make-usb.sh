@@ -77,11 +77,11 @@ DISK_SIZE=$(echo "$DISK_INFO" | grep "Disk Size" | sed 's/.*Disk Size: //' | sed
 DISK_NAME=$(echo "$DISK_INFO" | grep "Media Name" | sed 's/.*Media Name: //')
 DISK_NUM="${USB_DEV#/dev/disk}"
 
-# Verifica dimensione minima (12GB)
+# Verifica dimensione minima — immagine è 6GB, serve almeno 7GB
 DISK_BYTES=$(diskutil info "$USB_DEV" | grep "Disk Size" | grep -o '[0-9]* Bytes' | awk '{print $1}')
-MIN_BYTES=$((11 * 1024 * 1024 * 1024))
+MIN_BYTES=$((7 * 1024 * 1024 * 1024))
 if [ -n "$DISK_BYTES" ] && [ "$DISK_BYTES" -lt "$MIN_BYTES" ]; then
-    err "USB troppo piccola ($DISK_SIZE). Serve almeno 12GB."
+    err "USB troppo piccola ($DISK_SIZE). Serve almeno 8GB (consigliato 16GB+)."
 fi
 
 echo ""
