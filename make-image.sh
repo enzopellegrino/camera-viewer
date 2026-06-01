@@ -84,25 +84,34 @@ SSH_KEY=$(echo "$VM_JSON"  | python3 -c "import json,sys; d=json.load(sys.stdin)
     || err "SSH key non trovata"
 SSH_USER=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['RemoteUsername'])") \
     || err "SSH user non trovato"
-SSH_OPTS="-i $SSH_KEY -p $SSH_PORT -o StrictHostKeyChecking=no -o LogLevel=ERROR"
+# Array SSH options (evita problemi di word-splitting con spazi nel path)
+SSH_OPTS=(-i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=no -o LogLevel=ERROR)
+SSH_HOST="${SSH_USER}@localhost"
 
 info "SSH: ${SSH_USER}@localhost:${SSH_PORT}"
+info "Key: $SSH_KEY"
 
-# Copia file nella VM con scp standard
+# Test connessione
+ssh "${SSH_OPTS[@]}" "$SSH_HOST" "echo 'SSH OK'" || err "Connessione SSH alla VM fallita"
+ok "Connessione SSH alla VM OK"
+
+# Copia file nella VM
 info "Copia script e archivio app nella VM..."
-scp $SSH_OPTS "$SETUP_SCRIPT" "${SSH_USER}@localhost:/tmp/build_image_inside.sh"
-scp $SSH_OPTS "$APP_TGZ"      "${SSH_USER}@localhost:/tmp/camera-viewer-app.tar.gz"
+scp "${SSH_OPTS[@]}" "$SETUP_SCRIPT" "${SSH_HOST}:/tmp/build_image_inside.sh"
+scp "${SSH_OPTS[@]}" "$APP_TGZ"      "${SSH_HOST}:/tmp/camera-viewer-app.tar.gz"
+ok "File copiati nella VM"
 
 info "Avvio build nella VM (loop device disponibili)..."
 echo ""
 
 # Esegui build — output in tempo reale
-ssh $SSH_OPTS "${SSH_USER}@localhost" \
+ssh "${SSH_OPTS[@]}" "$SSH_HOST" \
     "sudo bash /tmp/build_image_inside.sh '$VERSION' '/tmp/cv-output' '/tmp/camera-viewer-app.tar.gz'"
 
 # Copia immagine dalla VM al Mac
 info "Copia immagine compressa..."
-scp $SSH_OPTS "${SSH_USER}@localhost:/tmp/cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
+mkdir -p "$OUTPUT_DIR"
+scp "${SSH_OPTS[@]}" "${SSH_HOST}:/tmp/cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
 
 # ── Step 4: Verifica ─────────────────────────────────────────────────────────
 step 4 "Verifica output..."
