@@ -34,6 +34,8 @@ function switchTab(name) {
   $$('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
   $$('.bnav-item').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
   $$('.panel').forEach(el => el.classList.toggle('active', el.id === 'tab-' + name));
+  // Persist tab across page refreshes
+  try { localStorage.setItem('cv-tab', name); } catch(e) {}
   // Close sidebar on mobile
   if (window.innerWidth <= 768) $('#sidebar').classList.remove('open');
 }
@@ -526,10 +528,36 @@ function renderVpnProfiles() {
 
 window.activateVpn = async id => {
   const p = _vpnProfiles.find(x => x.id === id);
-  const btn = document.querySelector(`[onclick="activateVpn('${id}')"]`);
-  if (btn) { btn.disabled = true; btn.textContent = 'Connessione…'; }
+  const profileName = p?.name || 'VPN';
+
+  // Mostra subito lo stato "connessione in corso"
+  const ind = $('#vpn-status-indicator'), txt = $('#vpn-status-text'), sub = $('#vpn-status-sub');
+  if (ind) { ind.className = 'status-indicator connecting'; ind.textContent = '⏳'; }
+  if (txt) txt.textContent = `${profileName} — Connessione in corso…`;
+  if (sub) sub.textContent = '';
+
   const { ok, data } = await api(`/api/vpn/profiles/${id}/activate`, { method: 'POST' });
-  toast(data.message || (ok ? 'VPN attivata' : 'Errore'), ok ? 'ok' : 'err');
+  if (!ok) {
+    toast(data.message || 'Errore attivazione VPN', 'err');
+    await loadVpnStatus();
+    return;
+  }
+
+  // Polling ogni 2s finché il tunnel è attivo (max 20 tentativi = 40s)
+  toast(`${profileName}: connessione in corso…`, 'ok');
+  let connected = false;
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 2000));
+    const { data: st } = await api('/api/vpn');
+    if (st.active) { connected = true; break; }
+    if (txt) txt.textContent = `${profileName} — Connessione in corso… (${(i+1)*2}s)`;
+  }
+
+  if (connected) {
+    toast(`${profileName} connesso!`, 'ok');
+  } else {
+    toast('Timeout: VPN non connessa. Controlla le credenziali.', 'err');
+  }
   await loadVpnStatus();
 };
 
@@ -741,6 +769,12 @@ $('#apply-btn')?.addEventListener('click', async () => {
 (async () => {
   const ok = await initAuth();
   if (!ok) return;
+
+  // Ripristina il tab salvato al refresh (prima di caricare i dati)
+  try {
+    const saved = localStorage.getItem('cv-tab');
+    if (saved) switchTab(saved);
+  } catch(e) {}
 
   // Load site name (public)
   await loadSiteName();

@@ -238,6 +238,15 @@ input::placeholder,textarea::placeholder{color:var(--dim)}
   font-size:18px;flex-shrink:0;}
 .status-indicator.active{border-color:var(--success);background:rgba(38,217,160,.1)}
 .status-indicator.error{border-color:var(--danger);background:rgba(242,87,87,.1)}
+.status-indicator.connecting{
+  border-color:var(--warning);background:rgba(245,166,35,.1);
+  animation:spin-border 1s linear infinite;
+}
+@keyframes spin-border{
+  0%{box-shadow:0 0 0 0 rgba(245,166,35,.6)}
+  50%{box-shadow:0 0 0 4px rgba(245,166,35,.1)}
+  100%{box-shadow:0 0 0 0 rgba(245,166,35,.6)}
+}
 .label-bold{font-size:.9rem;font-weight:600}
 .label-muted{font-size:.8rem;color:var(--muted);margin-top:2px}
 
