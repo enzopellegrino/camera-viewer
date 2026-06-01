@@ -112,6 +112,8 @@ cat > /target/etc/hosts << 'EOF'
 127.0.0.1  localhost
 127.0.1.1  camera-viewer
 EOF
+# Aggiungi hostname del container (evita warning 'unable to resolve host' in sudo)
+echo "127.0.0.1 $(hostname 2>/dev/null || echo builder)" >> /target/etc/hosts
 
 # Mount per chroot
 for d in dev dev/pts proc sys run; do
