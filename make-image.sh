@@ -68,25 +68,34 @@ ok "App: $(ls -lh "$APP_TGZ" | awk '{print $5}')"
 step 3 "Copia file nella VM e avvio build (~20-30 min)..."
 echo ""
 
-# Determina nome VM
-VM_NAME=$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 || echo "podman-machine-default")
+# Ottieni SSH config dalla VM (podman machine scp non disponibile in v5.x)
 info() { echo -e "  ${C}→${E} $1"; }
+VM_NAME=$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 || echo "podman-machine-default")
 info "VM: $VM_NAME"
 
-# Copia file nella VM via scp
-info "Copia script di build nella VM..."
-podman machine scp "$SETUP_SCRIPT"  "${VM_NAME}:/tmp/build_image_inside.sh"
-podman machine scp "$APP_TGZ"       "${VM_NAME}:/tmp/camera-viewer-app.tar.gz"
+VM_JSON=$(podman machine inspect "$VM_NAME" 2>/dev/null)
+SSH_PORT=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['Port'])")
+SSH_KEY=$(echo "$VM_JSON"  | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['IdentityPath'])")
+SSH_USER=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['RemoteUsername'])")
+SSH_OPTS="-i $SSH_KEY -p $SSH_PORT -o StrictHostKeyChecking=no -o LogLevel=ERROR"
 
-info "Avvio build (loop device disponibili nella VM Linux)..."
+info "SSH: ${SSH_USER}@localhost:${SSH_PORT}"
+
+# Copia file nella VM con scp standard
+info "Copia script e archivio app nella VM..."
+scp $SSH_OPTS "$SETUP_SCRIPT" "${SSH_USER}@localhost:/tmp/build_image_inside.sh"
+scp $SSH_OPTS "$APP_TGZ"      "${SSH_USER}@localhost:/tmp/camera-viewer-app.tar.gz"
+
+info "Avvio build nella VM (loop device disponibili)..."
 echo ""
 
-# Esegui il build nella VM — output in tempo reale
-podman machine ssh -- "sudo bash /tmp/build_image_inside.sh '$VERSION' '/tmp/cv-output' '/tmp/camera-viewer-app.tar.gz'"
+# Esegui build — output in tempo reale
+ssh $SSH_OPTS "${SSH_USER}@localhost" \
+    "sudo bash /tmp/build_image_inside.sh '$VERSION' '/tmp/cv-output' '/tmp/camera-viewer-app.tar.gz'"
 
-# Copia il risultato dalla VM al Mac
-info "Copia immagine compressa dal Mac..."
-podman machine scp "${VM_NAME}:/tmp/cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
+# Copia immagine dalla VM al Mac
+info "Copia immagine compressa..."
+scp $SSH_OPTS "${SSH_USER}@localhost:/tmp/cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
 
 # ── Step 4: Verifica ─────────────────────────────────────────────────────────
 step 4 "Verifica output..."
