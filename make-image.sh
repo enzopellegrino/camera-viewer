@@ -116,7 +116,7 @@ set -e
 CV_BUILD_DIR="\$HOME/cv-build"
 CV_OUT_DIR="\$HOME/cv-output"
 
-mkdir -p "\$CV_BUILD_DIR" "\$CV_OUT_DIR"
+mkdir -p "\$CV_BUILD_DIR" "\$CV_OUT_DIR" "\$CV_OUT_DIR/apt-cache"
 cp /tmp/build_image_inside.sh "\$CV_BUILD_DIR/"
 cp /tmp/camera-viewer-app.tar.gz "\$CV_OUT_DIR/"
 
