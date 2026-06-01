@@ -1,35 +1,59 @@
 #!/bin/bash
 # =============================================================================
-# Camera Viewer — Setup NUC6 i5 (Ubuntu 24.04 LTS)
+# Camera Viewer — Universal First Boot Setup
 #
-# Questo script viene eseguito automaticamente al primo avvio dopo
-# l'installazione di Ubuntu via autoinstall.
+# Funziona su qualsiasi PC/NUC x86_64 con Ubuntu Server 24.04.
+# Rileva automaticamente la GPU e configura VAAPI se disponibile.
+# L'app viene estratta dal tar.gz in /home/pi/ (incluso nell'USB installer)
+# oppure clonata da GitHub come fallback.
 #
-# Può essere eseguito anche manualmente su qualsiasi NUC:
-#   sudo bash setup/setup_nuc.sh
-#
-# NON contiene IP hardcoded: funziona su qualsiasi rete.
+# NON eseguire manualmente in produzione — lanciato da cloud-init al primo avvio.
+# Per test manuali: sudo bash setup/setup_nuc.sh
 # =============================================================================
 set -euo pipefail
 
 LOG="/home/pi/setup-nuc.log"
 exec > >(tee -a "$LOG") 2>&1
-echo "=== Camera Viewer NUC6 Setup: $(date) ==="
+echo "════════════════════════════════════════════════"
+echo " Camera Viewer — Setup: $(date)"
+echo "════════════════════════════════════════════════"
 
-# -----------------------------------------------------------------------------
-# 1. Attendi connessione internet
-# -----------------------------------------------------------------------------
+# ── 1. Attendi internet (serve per apt) ──────────────────────────────────────
+echo ""
 echo "[1/9] Attesa connessione internet..."
 for i in $(seq 1 30); do
-    curl -sf --max-time 5 https://github.com > /dev/null 2>&1 && echo "     Connesso." && break
+    curl -sf --max-time 5 http://deb.debian.org > /dev/null 2>&1 && echo "     ✓ Connesso." && break
     echo "     Tentativo $i/30..."
     sleep 5
 done
 
-# -----------------------------------------------------------------------------
-# 2. Pacchetti di sistema
-# -----------------------------------------------------------------------------
-echo "[2/9] Installazione pacchetti di sistema..."
+# ── 2. Rileva GPU e pacchetti grafici ────────────────────────────────────────
+echo ""
+echo "[2/9] Rilevamento GPU..."
+GPU_INFO=$(lspci 2>/dev/null | grep -iE 'vga|display|3d controller' || true)
+echo "     $GPU_INFO"
+
+CV_HWDEC_BACKEND=""
+LIBVA_DRIVER_NAME=""
+VAAPI_PKGS=""
+
+if echo "$GPU_INFO" | grep -qi intel; then
+    echo "     → Intel GPU — installazione driver VAAPI iHD"
+    VAAPI_PKGS="i965-va-driver intel-media-va-driver vainfo libva-drm2 libva-x11-2"
+    CV_HWDEC_BACKEND="vaapi"
+    LIBVA_DRIVER_NAME="iHD"
+elif echo "$GPU_INFO" | grep -qiE 'amd|radeon|advanced micro'; then
+    echo "     → AMD GPU — installazione driver VAAPI Mesa"
+    VAAPI_PKGS="mesa-va-drivers vainfo libva-drm2 libva-x11-2"
+    CV_HWDEC_BACKEND="vaapi"
+    LIBVA_DRIVER_NAME="radeonsi"
+else
+    echo "     → GPU non riconosciuta — SW decode (funziona su qualsiasi hardware)"
+fi
+
+# ── 3. Pacchetti di sistema ──────────────────────────────────────────────────
+echo ""
+echo "[3/9] Installazione pacchetti di sistema..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -q
 apt-get install -y \
@@ -38,66 +62,76 @@ apt-get install -y \
     python3-flask \
     openvpn wireguard-tools \
     xorg openbox lightdm \
-    i965-va-driver intel-media-va-driver vainfo libva-drm2 libva-x11-2 \
+    libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 libxkbcommon-x11-0 \
     unclutter x11-xserver-utils feh \
-    git curl wget net-tools iproute2 \
-    network-manager
+    pciutils git curl wget net-tools iproute2 \
+    network-manager \
+    ${VAAPI_PKGS}
 
-# -----------------------------------------------------------------------------
-# 3. Clone / aggiorna repo
-# -----------------------------------------------------------------------------
-echo "[3/9] Clone repository..."
-cd /home/pi
-REPO_URL="https://github.com/enzopellegrino/camera-viewer.git"
-BRANCH="main"
-
-if [ ! -d "camera-viewer" ]; then
-    sudo -u pi git clone -b "$BRANCH" "$REPO_URL" camera-viewer
+# ── 4. Estrai app o clone GitHub ─────────────────────────────────────────────
+echo ""
+if [ -f /home/pi/camera-viewer.tar.gz ]; then
+    echo "[4/9] Estrazione app dall'USB..."
+    rm -rf /home/pi/camera-viewer
+    mkdir -p /home/pi/camera-viewer
+    tar xzf /home/pi/camera-viewer.tar.gz -C /home/pi/camera-viewer/ 2>/dev/null || \
+    tar xzf /home/pi/camera-viewer.tar.gz -C /home/pi/camera-viewer/ --warning=no-unknown-keyword 2>/dev/null || true
+    chown -R pi:pi /home/pi/camera-viewer
+    rm -f /home/pi/camera-viewer.tar.gz
+    echo "     ✓ App estratta"
 else
-    sudo -u pi git -C camera-viewer fetch origin
-    sudo -u pi git -C camera-viewer checkout "$BRANCH"
-    sudo -u pi git -C camera-viewer pull
+    echo "[4/9] Fallback: clone da GitHub..."
+    sudo -u pi git clone -b main \
+        https://github.com/enzopellegrino/camera-viewer.git \
+        /home/pi/camera-viewer 2>&1 | tail -3
 fi
 
-# -----------------------------------------------------------------------------
-# 4. Python venv + dipendenze
-# -----------------------------------------------------------------------------
-echo "[4/9] Python venv..."
-cd /home/pi/camera-viewer
-sudo -u pi python3 -m venv .venv
-sudo -u pi .venv/bin/pip install --upgrade pip -q
-sudo -u pi .venv/bin/pip install -r requirements.txt -q
+# Verifica che l'app sia presente
+if [ ! -f /home/pi/camera-viewer/main.py ]; then
+    echo "ERRORE: app non trovata in /home/pi/camera-viewer/"
+    exit 1
+fi
 
-# -----------------------------------------------------------------------------
-# 5. Script di sistema (cv-*)
-# -----------------------------------------------------------------------------
-echo "[5/9] Installazione script cv-*..."
+# ── 5. Python venv ───────────────────────────────────────────────────────────
+echo ""
+echo "[5/9] Python venv..."
+cd /home/pi/camera-viewer
+sudo -H -u pi python3 -m venv .venv
+sudo -H -u pi .venv/bin/pip install --upgrade pip -q
+sudo -H -u pi .venv/bin/pip install -r requirements.txt -q
+sudo -H -u pi .venv/bin/pip install flask -q
+echo "     ✓ venv pronto"
+
+# ── 6. Script di sistema cv-* ────────────────────────────────────────────────
+echo ""
+echo "[6/9] Script cv-*..."
 install -m 755 raspberry/scripts/cv-mode           /usr/local/sbin/cv-mode
 install -m 755 raspberry/scripts/cv-viewer-launch  /usr/local/sbin/cv-viewer-launch
 install -m 755 raspberry/scripts/cv-vpn            /usr/local/sbin/cv-vpn
 install -m 755 raspberry/scripts/cv-ovpn           /usr/local/sbin/cv-ovpn
 install -m 440 raspberry/scripts/sudoers-cv-helpers /etc/sudoers.d/cv-helpers
 
-# -----------------------------------------------------------------------------
-# 6. Stub pcmanfm → feh (server.py usa pcmanfm per lo sfondo del desktop)
-# -----------------------------------------------------------------------------
+# Aggiungi env VAAPI specifico al cv-viewer-launch per questa macchina
+if [ -n "$CV_HWDEC_BACKEND" ]; then
+    # Inserisce le variabili GPU dopo la riga 'export QT_QPA_PLATFORM=xcb'
+    sed -i "/export QT_QPA_PLATFORM/a export CV_HWDEC_BACKEND=${CV_HWDEC_BACKEND}\nexport LIBVA_DRIVER_NAME=${LIBVA_DRIVER_NAME}" \
+        /usr/local/sbin/cv-viewer-launch
+    echo "     ✓ VAAPI configurato: backend=${CV_HWDEC_BACKEND}, driver=${LIBVA_DRIVER_NAME}"
+fi
+
+# Stub pcmanfm → feh
 cat > /usr/local/bin/pcmanfm << 'EOF'
 #!/bin/bash
-# Stub: redirige pcmanfm --set-wallpaper a feh (usato da camera-viewer su openbox)
 if [[ "${1:-}" == "--set-wallpaper" ]]; then
-    for arg in "$@"; do
-        [[ "$arg" == --* ]] && continue
-        feh --bg-fill "$arg" 2>/dev/null || true
-        break
-    done
+    for arg in "$@"; do [[ "$arg" == --* ]] && continue; feh --bg-fill "$arg" 2>/dev/null || true; break; fi
 fi
 EOF
 chmod +x /usr/local/bin/pcmanfm
 
-# -----------------------------------------------------------------------------
-# 7. LightDM: autologin come pi con sessione openbox
-# -----------------------------------------------------------------------------
-echo "[6/9] Configurazione display manager..."
+# ── 7. Display manager: LightDM + openbox ────────────────────────────────────
+echo ""
+echo "[7/9] Display manager..."
+
 mkdir -p /etc/lightdm/lightdm.conf.d
 cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf << 'EOF'
 [Seat:*]
@@ -109,45 +143,36 @@ EOF
 cat > /usr/share/xsessions/openbox.desktop << 'EOF'
 [Desktop Entry]
 Name=Openbox
-Comment=Log in using the Openbox window manager
 Exec=/usr/bin/openbox-session
 TryExec=/usr/bin/openbox-session
 Type=Application
 EOF
 
-# -----------------------------------------------------------------------------
-# 8. Openbox autostart
-# -----------------------------------------------------------------------------
-echo "[7/9] Configurazione openbox autostart..."
-sudo -u pi mkdir -p /home/pi/.config/openbox
-
-cat > /home/pi/.config/openbox/autostart << 'EOF'
+mkdir -p /home/pi/.config/openbox
+cat > /home/pi/.config/openbox/autostart << EOF
 # Camera Viewer Kiosk — openbox autostart
-
-# Intel HD 520 (NUC6 Skylake): VAAPI hardware decode
-export LIBVA_DRIVER_NAME=iHD
-export CV_HWDEC_BACKEND=vaapi
-
-# Disabilita screen blanking
-xset s off
-xset -dpms
-xset s noblank
-
-# Nascondi cursore dopo 1 secondo di inattività
+xset s off; xset -dpms; xset s noblank
 unclutter -idle 1 -root &
-
-# Avvia il viewer (cv-viewer-launch controlla se ci sono telecamere configurate)
 /usr/local/sbin/cv-viewer-launch &
 EOF
-chown pi:pi /home/pi/.config/openbox/autostart
+chown -R pi:pi /home/pi/.config
+mkdir -p /home/pi/.config/camera-viewer
+chown pi:pi /home/pi/.config/camera-viewer
 
-# Directory config condivisa viewer ↔ portal
-sudo -u pi mkdir -p /home/pi/.config/camera-viewer
+# Rimuovi .Xauthority stale
+rm -f /home/pi/.Xauthority
 
-# -----------------------------------------------------------------------------
-# 9. Servizi systemd
-# -----------------------------------------------------------------------------
-echo "[8/9] Installazione servizi systemd..."
+# Gruppo nopasswdlogin per autologin LightDM
+groupadd -f nopasswdlogin
+usermod -a -G nopasswdlogin pi
+
+# Symlink LightDM come display-manager di default
+ln -sf /usr/lib/systemd/system/lightdm.service \
+       /etc/systemd/system/display-manager.service
+
+# ── 8. Servizi systemd ───────────────────────────────────────────────────────
+echo ""
+echo "[8/9] Servizi systemd..."
 install -m 644 raspberry/systemd/camera-webconfig.service \
     /etc/systemd/system/camera-webconfig.service
 
@@ -155,33 +180,31 @@ systemctl daemon-reload
 systemctl enable lightdm
 systemctl enable camera-webconfig
 
-# -----------------------------------------------------------------------------
-# Verifica VAAPI
-# -----------------------------------------------------------------------------
-echo "[9/9] Verifica VAAPI..."
-LIBVA_DRIVER_NAME=iHD vainfo 2>&1 | head -8 || \
-vainfo 2>&1 | head -8 || echo "(vainfo non disponibile)"
+# ── 9. Verifica VAAPI (se applicabile) ──────────────────────────────────────
+echo ""
+echo "[9/9] Verifica finale..."
+if [ -n "$LIBVA_DRIVER_NAME" ]; then
+    LIBVA_DRIVER_NAME=$LIBVA_DRIVER_NAME vainfo 2>&1 | head -6 || \
+        vainfo 2>&1 | head -6 || echo "     (vainfo non disponibile)"
+else
+    echo "     SW decode — nessuna verifica VAAPI necessaria"
+fi
 
-# -----------------------------------------------------------------------------
-# Cleanup e riavvio
-# -----------------------------------------------------------------------------
+# ── Cleanup e riavvio ────────────────────────────────────────────────────────
 touch /etc/cv-firstboot.done
-rm -f /home/pi/cv-firstboot.sh
+rm -f /home/pi/setup-nuc.sh
 
 IP=$(hostname -I | awk '{print $1}')
 echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║  Camera Viewer NUC6 — setup completato!         ║"
-echo "╠══════════════════════════════════════════════════╣"
-echo "║  Portal web: http://${IP}:80              ║"
-echo "║  SSH:        ssh pi@${IP}                 ║"
-echo "║                                                  ║"
-echo "║  Dopo il riavvio:                                ║"
-echo "║  → apri http://${IP} dal browser         ║"
-echo "║  → aggiungi telecamere                           ║"
-echo "║  → premi 'Avvia' → le vedi sulla TV             ║"
-echo "╚══════════════════════════════════════════════════╝"
+echo "╔══════════════════════════════════════════════╗"
+echo "║  ✅ Camera Viewer — Setup completato!        ║"
+echo "╠══════════════════════════════════════════════╣"
+echo "║  Portal:  http://${IP}               ║"
+echo "║  SSH:     ssh pi@${IP}              ║"
+echo "║  Login:   admin / admin              ║"
+echo "║           (cambia da Impostazioni → Utenti) ║"
+echo "╚══════════════════════════════════════════════╝"
 echo ""
-echo "Riavvio tra 10 secondi..."
+echo "Riavvio in 10 secondi..."
 sleep 10
 reboot
