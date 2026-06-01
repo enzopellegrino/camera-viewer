@@ -153,11 +153,10 @@ apt-get install -y -q --no-install-recommends mpv \
     i965-va-driver intel-media-va-driver \
     mesa-va-drivers vainfo libva-drm2 libva-x11-2
 
-# Python — usa pacchetti apt dove possibile (evita pip + venv enormi)
+# Python base — PySide6 viene installato via pip nel venv (non disponibile in apt)
 apt-get install -y -q --no-install-recommends \
-    python3-pip python3-venv python3-dev python3-flask \
-    python3-pyside6.qtcore python3-pyside6.qtgui python3-pyside6.qtwidgets \
-    python3-cryptography python3-pil
+    python3-pip python3-venv python3-dev \
+    python3-flask python3-cryptography python3-pil
 apt-get clean
 
 # VPN
@@ -227,12 +226,16 @@ set -euo pipefail
 cd /home/pi/camera-viewer || exit 0
 
 # Python venv
-# venv con --system-site-packages: usa PySide6/Flask da apt, pip solo per il resto
-sudo -H -u pi python3 -m venv --system-site-packages .venv
+# venv — PySide6 va installato via pip (non è in apt Ubuntu 24.04)
+# Cache pip → /output (montato dalla VM che ha 43GB liberi)
+export PIP_CACHE_DIR=/output/pip-cache
+mkdir -p /output/pip-cache
+sudo -H -u pi python3 -m venv .venv
 sudo -H -u pi .venv/bin/pip install --upgrade pip -q
-# Installa solo ciò che non è disponibile via apt (cryptography, pillow già in apt)
-sudo -H -u pi .venv/bin/pip install --no-deps \
-    pyinstaller 2>/dev/null || true  # opzionale, ignora errori
+sudo -H -u pi .venv/bin/pip install -r requirements.txt -q \
+    --cache-dir /output/pip-cache
+sudo -H -u pi .venv/bin/pip install flask -q \
+    --cache-dir /output/pip-cache
 
 # Script di sistema
 [ -f raspberry/scripts/cv-mode ] && \
