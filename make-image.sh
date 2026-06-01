@@ -123,14 +123,20 @@ cp /tmp/camera-viewer-app.tar.gz "\$CV_OUT_DIR/"
 echo "→ Spazio disponibile:"
 df -h "\$HOME" | tail -1
 
+echo "→ Caricamento modulo loop nella VM..."
+sudo modprobe loop max_loop=16 2>/dev/null || true
+# Crea loop device se non esistono
+for i in \$(seq 0 15); do
+    [ -b "/dev/loop\$i" ] || sudo mknod "/dev/loop\$i" b 7 "\$i" 2>/dev/null || true
+done
+ls /dev/loop0 && echo "loop devices pronti" || echo "warn: loop0 non trovato"
+
 echo "→ Avvio container Ubuntu amd64 con accesso privilegiato..."
 
-# Container Ubuntu dentro la VM — passa loop device dalla VM host
-# Senza --device /dev/loop*, losetup fallisce anche con --privileged
+# Monta l'intero /dev dalla VM nel container: tutti i loop device disponibili
 sudo podman run --rm --privileged \
     --platform linux/amd64 \
-    --device /dev/loop-control \
-    \$(for i in \$(seq 0 15); do echo "--device /dev/loop\$i"; done) \
+    -v /dev:/dev \
     -v "\$CV_BUILD_DIR":/setup:z \
     -v "\$CV_OUT_DIR":/output:z \
     ubuntu:24.04 \
