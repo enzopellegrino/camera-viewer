@@ -338,6 +338,7 @@ input::placeholder,textarea::placeholder{color:var(--dim)}
   background:var(--accent-dim);color:var(--accent);border:1px solid rgba(79,114,247,.3);
   vertical-align:middle;margin-left:6px;
 }
+.about-desc{font-size:.82rem;color:var(--muted);margin-bottom:2px}
 .about-author{font-size:.85rem;color:var(--muted)}
 .about-author strong{color:var(--text)}
 .about-year{font-size:.78rem;color:var(--dim)}
