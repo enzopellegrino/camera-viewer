@@ -131,12 +131,7 @@ class CameraWidget(QWidget):
             "~/.config/camera-viewer")
         self._placeholder_path = os.path.join(cfg_dir, "placeholder.jpg")
         self._placeholder_pixmap: QPixmap | None = None
-
-        self._placeholder_label = QLabel(self)
-        self._placeholder_label.setAlignment(Qt.AlignCenter)
-        self._placeholder_label.setStyleSheet("background: transparent;")
-        self._placeholder_label.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self._placeholder_label.hide()
+        self._show_placeholder_flag = False  # controlla paintEvent
 
         # Timer di riconnessione: usato da _check_process per ritardare il
         # restart dopo un drop dello stream. Named timer (non singleShot anonimo)
@@ -167,36 +162,27 @@ class CameraWidget(QWidget):
         super().closeEvent(event)
 
     # ── Placeholder image ─────────────────────────────────────────────────────
+    # Usa paintEvent direttamente: i QLabel figlio non si vedono correttamente
+    # su widget con WA_NativeWindow (finestra X11 reale usata da mpv).
 
     def _load_placeholder(self) -> None:
-        """Carica (o ricarica) il placeholder dal disco e aggiorna il label."""
+        """Carica (o ricarica) il placeholder dal disco."""
         if os.path.exists(self._placeholder_path):
             px = QPixmap(self._placeholder_path)
             if not px.isNull():
                 self._placeholder_pixmap = px
-                self._scale_placeholder()
                 return
         self._placeholder_pixmap = None
-        self._placeholder_label.clear()
-
-    def _scale_placeholder(self) -> None:
-        """Ridimensiona il pixmap alla dimensione corrente del widget."""
-        if self._placeholder_pixmap and self.width() > 0 and self.height() > 0:
-            scaled = self._placeholder_pixmap.scaled(
-                self.width(), self.height(),
-                Qt.KeepAspectRatio, Qt.SmoothTransformation,
-            )
-            self._placeholder_label.setPixmap(scaled)
 
     def _show_placeholder(self) -> None:
         self._load_placeholder()
-        self._placeholder_label.setGeometry(0, 0, self.width(), self.height())
-        self._placeholder_label.show()
-        self._placeholder_label.lower()   # dietro lo status text
+        self._show_placeholder_flag = True
+        self.update()   # richiede repaint → paintEvent disegna il logo
         self._status_label.raise_()
 
     def _hide_placeholder(self) -> None:
-        self._placeholder_label.hide()
+        self._show_placeholder_flag = False
+        self.update()   # cancella il logo
 
     # ── mpv process ─────────────────────────────────────────────────────────────
 
@@ -297,11 +283,26 @@ class CameraWidget(QWidget):
             self.clicked.emit(self)
         super().mousePressEvent(event)
 
+    def paintEvent(self, event):
+        """Disegna il placeholder logo quando lo stream non è attivo."""
+        super().paintEvent(event)
+        if self._show_placeholder_flag and self._placeholder_pixmap:
+            from PySide6.QtGui import QPainter
+            painter = QPainter(self)
+            scaled = self._placeholder_pixmap.scaled(
+                self.width(), self.height(),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation,
+            )
+            x = (self.width() - scaled.width()) // 2
+            y = (self.height() - scaled.height()) // 2
+            painter.drawPixmap(x, y, scaled)
+            painter.end()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._name_label.move(5, 5)
         self._name_label.raise_()
         self._status_label.setGeometry(0, 0, self.width(), self.height())
-        self._placeholder_label.setGeometry(0, 0, self.width(), self.height())
-        self._scale_placeholder()
+        if self._show_placeholder_flag:
+            self.update()  # ridisegna il placeholder alla nuova dimensione
         # mpv tracks the embedding window size automatically via --wid.
