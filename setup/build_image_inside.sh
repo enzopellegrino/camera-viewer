@@ -345,6 +345,51 @@ WantedBy=multi-user.target
 EOF
 systemctl enable cv-detect-gpu
 
+# ── Espansione automatica partizione Data al primo avvio ──────────────
+# La partizione /data occupa solo ~768MB nell'immagine.
+# Questo script espande p3 per usare tutto lo spazio libero della USB/disco.
+cat > /usr/local/sbin/cv-expand-data << 'EOF'
+#!/bin/bash
+# Espande la partizione data (p3) per riempire tutto il disco.
+# Eseguito una sola volta al primo avvio.
+set -e
+
+# Trova il disco e la partizione p3
+DISK=$(lsblk -no PKNAME $(findmnt -n -o SOURCE /data) 2>/dev/null | head -1)
+[ -z "$DISK" ] && exit 0
+
+DISK="/dev/$DISK"
+PART="${DISK}3"
+
+# Verifica spazio libero (almeno 500MB per espandere)
+FREE_MB=$(parted -sm "$DISK" unit MB print free 2>/dev/null | grep "free" | tail -1 | awk -F: '{print int($4)}' || echo 0)
+[ "$FREE_MB" -lt 500 ] && echo "Poco spazio libero, skip" && exit 0
+
+echo "Espansione /data su $PART (spazio libero: ${FREE_MB}MB)..."
+parted -s "$DISK" resizepart 3 100% 2>/dev/null || true
+sleep 1
+resize2fs "$PART" 2>/dev/null || true
+echo "Espansione completata."
+touch /etc/cv-data-expanded
+EOF
+chmod +x /usr/local/sbin/cv-expand-data
+
+cat > /etc/systemd/system/cv-expand-data.service << 'EOF'
+[Unit]
+Description=Camera Viewer — Espansione partizione dati
+After=local-fs.target
+ConditionPathExists=!/etc/cv-data-expanded
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cv-expand-data
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl enable cv-expand-data
+
 echo "Camera Viewer configurato."
 CHROOT
 ok "Camera Viewer configurato"
