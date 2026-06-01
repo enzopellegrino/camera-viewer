@@ -103,7 +103,8 @@ class CameraWidget(QWidget):
 
         # Native X11 window so winId() is a real XID for mpv --wid.
         self.setAttribute(Qt.WA_NativeWindow)
-        self.setAttribute(Qt.WA_OpaquePaintEvent)
+        # WA_OpaquePaintEvent rimosso: con esso attivo paintEvent non viene
+        # invocato correttamente su native X11 window → placeholder non visibile.
         self.setStyleSheet("background-color: #0d0d0d;")
         self.setMinimumSize(160, 90)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)

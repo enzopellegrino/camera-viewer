@@ -533,6 +533,16 @@ function escapeHtml(s) {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 refreshStatus();
+$("#restart-viewer-btn").addEventListener("click", async () => {
+  const btn = $("#restart-viewer-btn");
+  btn.textContent = "Riavvio…";
+  btn.disabled = true;
+  const { ok, data } = await api("/api/restart-viewer", { method: "POST" });
+  toast(data?.message || (ok ? "Viewer riavviato" : "Errore"), ok ? "ok" : "err");
+  btn.textContent = "🔄 Riavvia viewer";
+  btn.disabled = false;
+});
+
 loadCameras();
 loadSettings();
 loadVpnStatus();
