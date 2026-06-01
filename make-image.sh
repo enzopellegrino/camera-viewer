@@ -70,13 +70,20 @@ echo ""
 
 # Ottieni SSH config dalla VM (podman machine scp non disponibile in v5.x)
 info() { echo -e "  ${C}→${E} $1"; }
-VM_NAME=$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 || echo "podman-machine-default")
+# Strip asterisk (*) dal nome VM — podman lo aggiunge alla VM attiva
+VM_NAME=$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 | tr -d '*' | tr -d ' ')
+[ -z "$VM_NAME" ] && VM_NAME="podman-machine-default"
 info "VM: $VM_NAME"
 
-VM_JSON=$(podman machine inspect "$VM_NAME" 2>/dev/null)
-SSH_PORT=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['Port'])")
-SSH_KEY=$(echo "$VM_JSON"  | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['IdentityPath'])")
-SSH_USER=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['RemoteUsername'])")
+VM_JSON=$(podman machine inspect "$VM_NAME" 2>/dev/null) \
+    || err "Impossibile ispezionare la VM '$VM_NAME'"
+
+SSH_PORT=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['Port'])") \
+    || err "SSH port non trovata"
+SSH_KEY=$(echo "$VM_JSON"  | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['IdentityPath'])") \
+    || err "SSH key non trovata"
+SSH_USER=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['RemoteUsername'])") \
+    || err "SSH user non trovato"
 SSH_OPTS="-i $SSH_KEY -p $SSH_PORT -o StrictHostKeyChecking=no -o LogLevel=ERROR"
 
 info "SSH: ${SSH_USER}@localhost:${SSH_PORT}"
