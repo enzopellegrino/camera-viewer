@@ -458,18 +458,24 @@ async function loadVpnStatus() {
     api('/api/vpn/profiles'),
   ]);
   const st = statusRes.data;
+  _vpnProfiles = profilesRes.data?.profiles || [];
+  _vpnActiveId = profilesRes.data?.active_id || null;
+
   const ind = $('#vpn-status-indicator'), txt = $('#vpn-status-text'), sub = $('#vpn-status-sub');
   if (st.active) {
     ind.className = 'status-indicator active'; ind.textContent = '🔒';
-    txt.textContent = `${st.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'} attivo`;
+    // Show profile name if we know which one is active
+    const activeProfile = _vpnProfiles.find(p => p.id === _vpnActiveId);
+    const protoLabel = st.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard';
+    txt.textContent = activeProfile
+      ? `${activeProfile.name} — ${protoLabel} attivo`
+      : `${protoLabel} attivo`;
     sub.textContent = st.ip || '';
   } else {
     ind.className = 'status-indicator'; ind.textContent = '🔓';
     txt.textContent = 'Nessun tunnel attivo';
     sub.textContent = '';
   }
-  _vpnProfiles = profilesRes.data?.profiles || [];
-  _vpnActiveId = profilesRes.data?.active_id || null;
   renderVpnProfiles();
 }
 

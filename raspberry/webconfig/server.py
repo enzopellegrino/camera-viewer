@@ -575,14 +575,24 @@ def api_placeholder_delete():
 @app.route("/api/vpn/profiles", methods=["GET"])
 @login_required()
 def api_vpn_profiles_list():
-    # Cross-check: if profile is marked active but tunnel is not running, clear the flag
+    """Sync profile active flag with the real tunnel state."""
+    ovpn_st  = vpn_openvpn.status()
+    wg_st    = vpn.status()
+    tunnel_up = ovpn_st["active"] or wg_st["active"]
+
     marked_active = store.get_active_vpn_profile()
-    if marked_active:
-        ovpn_st = vpn_openvpn.status()
-        wg_st   = vpn.status()
-        if not ovpn_st["active"] and not wg_st["active"]:
-            store.set_vpn_profile_active(None)
-            marked_active = None
+    profiles      = store.list_vpn_profiles(mask_sensitive=True)
+
+    if tunnel_up and not marked_active and len(profiles) == 1:
+        # Tunnel is running but no profile is marked — auto-sync the only profile
+        store.set_vpn_profile_active(profiles[0]["id"])
+        marked_active = {"id": profiles[0]["id"]}
+
+    elif not tunnel_up and marked_active:
+        # Tunnel stopped (boot failure, network error) — clear stale active flag
+        store.set_vpn_profile_active(None)
+        marked_active = None
+
     return jsonify({
         "profiles": store.list_vpn_profiles(mask_sensitive=True),
         "active_id": (marked_active or {}).get("id"),
