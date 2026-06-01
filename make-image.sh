@@ -98,8 +98,9 @@ ok "Connessione SSH alla VM OK"
 
 # Copia file nella VM
 info "Copia script e archivio app nella VM..."
-scp "${SCP_OPTS[@]}" "$SETUP_SCRIPT" "${SSH_HOST}:/tmp/build_image_inside.sh"
-scp "${SCP_OPTS[@]}" "$APP_TGZ"      "${SSH_HOST}:/tmp/camera-viewer-app.tar.gz"
+# Usa $HOME (non /tmp che potrebbe essere tmpfs limitato in CoreOS)
+scp "${SCP_OPTS[@]}" "$SETUP_SCRIPT" "${SSH_HOST}:build_image_inside.sh"
+scp "${SCP_OPTS[@]}" "$APP_TGZ"      "${SSH_HOST}:camera-viewer-app.tar.gz"
 ok "File copiati nella VM"
 
 info "Avvio container Ubuntu DENTRO la VM (loop device garantiti)..."
@@ -117,8 +118,8 @@ CV_BUILD_DIR="\$HOME/cv-build"
 CV_OUT_DIR="\$HOME/cv-output"
 
 mkdir -p "\$CV_BUILD_DIR" "\$CV_OUT_DIR" "\$CV_OUT_DIR/apt-cache"
-cp /tmp/build_image_inside.sh "\$CV_BUILD_DIR/"
-cp /tmp/camera-viewer-app.tar.gz "\$CV_OUT_DIR/"
+cp "\$HOME/build_image_inside.sh" "\$CV_BUILD_DIR/"
+cp "\$HOME/camera-viewer-app.tar.gz" "\$CV_OUT_DIR/"
 
 echo "→ Spazio disponibile:"
 df -h "\$HOME" | tail -1
