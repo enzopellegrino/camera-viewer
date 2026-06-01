@@ -1,18 +1,22 @@
 #!/bin/bash
 # =============================================================================
-# Camera Viewer — Build script (gira DENTRO il container Podman)
+# Camera Viewer — Build script (gira nella VM Podman su macOS)
 #
 # Crea un'immagine disco Live USB con 3 partizioni:
 #   1. EFI    (512MB)  — GRUB bootloader
-#   2. System (8GB)    — Ubuntu minimal + Camera Viewer (squashfs)
-#   3. Data   (resto)  — Configurazione persistente (telecamere, VPN, ecc.)
+#   2. System (8GB)    — Ubuntu minimal + Camera Viewer
+#   3. Data   (resto)  — Config persistente (telecamere, VPN, ecc.)
 #
-# NON installla nulla sull'hard disk del PC. Gira interamente dalla USB.
+# NON installa nulla sull'hard disk del PC — gira dalla USB.
 # =============================================================================
 set -euo pipefail
 
 VERSION="${1:-2.0}"
-IMG_FILE="/output/camera-viewer-v${VERSION}.img"
+OUTPUT_DIR="${2:-/tmp/cv-output}"
+APP_TGZ="${3:-$OUTPUT_DIR/camera-viewer-app.tar.gz}"
+IMG_FILE="$OUTPUT_DIR/camera-viewer-v${VERSION}.img"
+
+mkdir -p "$OUTPUT_DIR"
 IMG_SIZE_MB=12288   # 12GB immagine raw (compressa xz → ~600MB)
 EFI_SIZE_MB=512
 SYSTEM_SIZE_MB=7680 # 7.5GB per il sistema
@@ -54,54 +58,30 @@ parted -s "$IMG_FILE" set 1 esp on
 ok "3 partizioni create"
 
 # ── Loop device e formattazione ───────────────────────────────────────────────
-log "Montaggio e formattazione..."
+log "Montaggio e formattazione (VM Linux — loop device disponibili)..."
 
-# Crea loop device se non esistono (Podman su macOS non li espone)
-if [ ! -c /dev/loop-control ]; then
-    info "Creazione loop devices manuale..."
-    mknod /dev/loop-control c 10 237 2>/dev/null || true
-    for i in $(seq 0 15); do
-        [ -b "/dev/loop$i" ] || mknod "/dev/loop$i" b 7 "$i" 2>/dev/null || true
-        chmod 666 "/dev/loop$i" 2>/dev/null || true
-    done
-fi
+# Nella VM Podman siamo su Linux reale: losetup funziona
+LOOP=$(losetup -f --show -P "$IMG_FILE")
+info "Loop device: $LOOP"
 
-# Prova losetup; se fallisce usa kpartx come alternativa
-LOOP=""
-if losetup -f &>/dev/null; then
-    LOOP=$(losetup -f --show -P "$IMG_FILE" 2>/dev/null || true)
-fi
-
-if [ -n "$LOOP" ]; then
-    info "Loop device: $LOOP (losetup)"
-    PART1="${LOOP}p1"; PART2="${LOOP}p2"; PART3="${LOOP}p3"
-else
-    # Fallback: kpartx usa device-mapper (funziona meglio nei container)
-    info "Fallback a kpartx (device-mapper)..."
-    apt-get install -y -q kpartx 2>/dev/null
-    KPARTX=$(kpartx -av "$IMG_FILE" 2>&1)
-    LOOP_NAME=$(echo "$KPARTX" | grep -oE 'loop[0-9]+' | head -1)
-    PART1="/dev/mapper/${LOOP_NAME}p1"
-    PART2="/dev/mapper/${LOOP_NAME}p2"
-    PART3="/dev/mapper/${LOOP_NAME}p3"
-    info "Device mapper: $LOOP_NAME"
-fi
-
-# Aspetta che i device siano pronti
+# Aspetta che le partizioni siano riconosciute dal kernel
+partprobe "$LOOP" 2>/dev/null || true
 sleep 1
-ls "$PART1" "$PART2" "$PART3" 2>/dev/null || {
-    echo "ERRORE: partizioni non disponibili. Mostra /dev:"; ls /dev/loop* /dev/mapper/ 2>/dev/null; exit 1
+ls "${LOOP}p1" "${LOOP}p2" "${LOOP}p3" || {
+    info "Retry partprobe..."
+    sleep 2
+    ls "${LOOP}p1" "${LOOP}p2" "${LOOP}p3" || exit 1
 }
 
-mkfs.vfat -F32 -n "CV-EFI"    "$PART1" 2>&1 | tail -2
-mkfs.ext4 -L  "cv-system"     "$PART2" -q
-mkfs.ext4 -L  "cv-data"       "$PART3" -q
+mkfs.vfat -F32 -n "CV-EFI"    "${LOOP}p1"
+mkfs.ext4 -L  "cv-system"     "${LOOP}p2" -q
+mkfs.ext4 -L  "cv-data"       "${LOOP}p3" -q
 ok "Filesystem creati"
 
 mkdir -p /target/boot/efi /cv-data
-mount "$PART2" /target
-mount "$PART1" /target/boot/efi
-mount "$PART3" /cv-data
+mount "${LOOP}p2" /target
+mount "${LOOP}p1" /target/boot/efi
+mount "${LOOP}p3" /cv-data
 
 # ── Debootstrap Ubuntu 24.04 minimal ─────────────────────────────────────────
 log "Debootstrap Ubuntu 24.04 minimal (richiede 5-10 min)..."
@@ -217,9 +197,9 @@ ok "Pacchetti installati"
 
 # ── Copia app Camera Viewer ───────────────────────────────────────────────────
 log "Copia app Camera Viewer..."
-if [ -f /output/camera-viewer-app.tar.gz ]; then
+if [ -f "$APP_TGZ" ]; then
     mkdir -p /target/home/pi/camera-viewer
-    tar xzf /output/camera-viewer-app.tar.gz \
+    tar xzf "$APP_TGZ" \
         -C /target/home/pi/camera-viewer/ \
         --warning=no-unknown-keyword 2>/dev/null || \
     tar xzf /output/camera-viewer-app.tar.gz \
@@ -424,18 +404,14 @@ umount /target/boot/efi 2>/dev/null || true
 umount /cv-data 2>/dev/null || true
 umount /target 2>/dev/null || true
 sync
-if [ -n "${LOOP:-}" ]; then
-    losetup -d "$LOOP" 2>/dev/null || true
-else
-    kpartx -dv "$IMG_FILE" 2>/dev/null || true
-fi
+losetup -d "$LOOP" 2>/dev/null || true
 ok "Smontaggio completato"
 
 # ── Comprimi con xz ───────────────────────────────────────────────────────────
 log "Compressione immagine (richiede 5-10 min)..."
 RAW_SIZE=$(ls -lh "$IMG_FILE" | awk '{print $5}')
 info "Raw size: $RAW_SIZE"
-xz -9 -T0 --verbose "$IMG_FILE"
+xz -9 -T0 "$IMG_FILE"
 COMPRESSED="${IMG_FILE}.xz"
 COMP_SIZE=$(ls -lh "$COMPRESSED" | awk '{print $5}')
 ok "Compressione completata: $COMP_SIZE (era $RAW_SIZE)"
