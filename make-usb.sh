@@ -141,35 +141,46 @@ ok "Partizione CIDATA scritta sull'USB"
 
 # ── Step 6: Patch GRUB (aggiunge 'autoinstall') ──────────────────────────────
 echo ""
-step 6 "Patch grub.cfg (aggiunge 'autoinstall')..."
+step 6 "Patch grub.cfg — schermata boot Camera Viewer..."
 python3 - << 'PYEOF' > "$WORK_DIR/grub-new.cfg"
 import sys
+
+# ── GRUB branded per Camera Viewer ──────────────────────────────────────
+# Colori: sfondo nero, testo ciano (tema professionale scuro)
+# Voci menu: italiano, branding Camera Viewer
+# Timeout: 8s poi avvia automaticamente l'installazione
+# Limite: esattamente 573 byte (overwrite in-place del grub.cfg ISO)
 content = (
-    'set timeout=10\n\n'
-    'loadfont unicode\n\n'
+    'set timeout=8\n'
+    'set default=0\n'
+    '\n'
+    'set color_normal=cyan/black\n'
+    'set color_highlight=black/cyan\n'
     'set menu_color_normal=white/black\n'
-    'set menu_color_highlight=black/light-gray\n\n'
-    'menuentry "Install Camera Viewer OS" {\n'
+    'set menu_color_highlight=black/cyan\n'
+    '\n'
+    'menuentry " Installa Camera Viewer v2.0" {\n'
     '\tset gfxpayload=keep\n'
     '\tlinux\t/casper/vmlinuz autoinstall  ---\n'
     '\tinitrd\t/casper/initrd\n'
     '}\n'
-    'menuentry "Manual Ubuntu Install" {\n'
+    'menuentry " Installa manualmente" {\n'
     '\tset gfxpayload=keep\n'
     '\tlinux\t/casper/vmlinuz  ---\n'
     '\tinitrd\t/casper/initrd\n'
     '}\n'
     'if [ "$grub_platform" = "efi" ]; then\n'
-    'menuentry \'Boot from next volume\' {\n\texit 1\n}\n'
-    'menuentry \'UEFI Firmware Settings\' {\n\tfwsetup\n}\n'
-    'else\n'
-    'menuentry \'Test memory\' {\n\tlinux16 /boot/memtest86+x64.bin\n}\n'
+    'menuentry \'UEFI Firmware Settings\' {\n'
+    '\tfwsetup\n'
+    '}\n'
     'fi\n'
 )
 orig = 573
 size = len(content.encode())
 if size > orig:
-    sys.stderr.write(f'ERRORE: grub.cfg troppo grande ({size} > {orig})\n'); sys.exit(1)
+    sys.stderr.write(f'ERRORE: grub.cfg troppo grande ({size} > {orig})\n')
+    sys.exit(1)
+sys.stderr.write(f'grub.cfg: {size}/{orig} byte\n')
 sys.stdout.buffer.write((content + ' ' * (orig - size)).encode())
 PYEOF
 

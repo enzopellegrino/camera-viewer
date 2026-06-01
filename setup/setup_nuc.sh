@@ -14,9 +14,50 @@ set -euo pipefail
 
 LOG="/home/pi/setup-nuc.log"
 exec > >(tee -a "$LOG") 2>&1
-echo "════════════════════════════════════════════════"
-echo " Camera Viewer — Setup: $(date)"
-echo "════════════════════════════════════════════════"
+
+# Banner ASCII
+echo ""
+echo "  ┌─────────────────────────────────────────────┐"
+echo "  │                                             │"
+echo "  │   🎥   C A M E R A   V I E W E R   2.0    │"
+echo "  │        Sistema di Monitoraggio Video        │"
+echo "  │                                             │"
+echo "  │        Creato da Enzo Pellegrino           │"
+echo "  │                                             │"
+echo "  └─────────────────────────────────────────────┘"
+echo ""
+echo "  Setup avviato: $(date)"
+echo ""
+
+# ── 0. Splash console al boot successivo (Plymouth text theme) ──────────────
+# Mostra "Camera Viewer" sul boot screen invece del logo Ubuntu
+mkdir -p /usr/share/plymouth/themes/camera-viewer
+cat > /usr/share/plymouth/themes/camera-viewer/camera-viewer.plymouth << 'EOF'
+[Plymouth Theme]
+Name=Camera Viewer
+Description=Camera Viewer Boot Screen
+ModuleName=details
+EOF
+cat > /usr/share/plymouth/themes/camera-viewer/camera-viewer.script << 'EOF'
+Window.SetBackgroundTopColor(0.05, 0.06, 0.10);
+Window.SetBackgroundBottomColor(0.05, 0.06, 0.10);
+EOF
+update-alternatives --install \
+    /usr/share/plymouth/themes/default.plymouth \
+    default.plymouth \
+    /usr/share/plymouth/themes/camera-viewer/camera-viewer.plymouth 200 2>/dev/null || true
+update-initramfs -u -k all 2>/dev/null || true
+
+# Console login message
+cat > /etc/issue << 'EOF'
+
+  ┌─────────────────────────────────────────────┐
+  │   🎥   Camera Viewer v2.0                   │
+  │        Sistema di Monitoraggio Video        │
+  │        http://\4                            │
+  └─────────────────────────────────────────────┘
+
+EOF
 
 # ── 1. Attendi internet (serve per apt) ──────────────────────────────────────
 echo ""
