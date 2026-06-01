@@ -17,10 +17,10 @@ APP_TGZ="${3:-$OUTPUT_DIR/camera-viewer-app.tar.gz}"
 IMG_FILE="$OUTPUT_DIR/camera-viewer-v${VERSION}.img"
 
 mkdir -p "$OUTPUT_DIR"
-IMG_SIZE_MB=12288   # 12GB immagine raw (compressa xz → ~600MB)
-EFI_SIZE_MB=512
-SYSTEM_SIZE_MB=7680 # 7.5GB per il sistema
-# DATA occupa il resto
+IMG_SIZE_MB=4096    # 4GB immagine raw (compressa xz → ~500MB)
+EFI_SIZE_MB=256     # EFI 256MB
+SYSTEM_SIZE_MB=3072 # Sistema 3GB (sufficiente per Ubuntu minimal + pacchetti)
+# DATA occupa il resto (~768MB, espandibile dopo il primo avvio)
 
 log()  { echo -e "\n  \033[1m>>> $*\033[0m"; }
 ok()   { echo -e "  \033[32m✓\033[0m $*"; }

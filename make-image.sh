@@ -112,29 +112,35 @@ ssh "${SSH_OPTS[@]}" "$SSH_HOST" << SSHEOF
 set -e
 
 # Prepara directory
-sudo mkdir -p /tmp/cv-build /tmp/cv-output
-sudo cp /tmp/build_image_inside.sh /tmp/cv-build/
-sudo cp /tmp/camera-viewer-app.tar.gz /tmp/cv-output/
-sudo chmod 777 /tmp/cv-build /tmp/cv-output
+# Usa $HOME (più spazio di /tmp nella VM Fedora CoreOS)
+CV_BUILD_DIR="\$HOME/cv-build"
+CV_OUT_DIR="\$HOME/cv-output"
+
+mkdir -p "\$CV_BUILD_DIR" "\$CV_OUT_DIR"
+cp /tmp/build_image_inside.sh "\$CV_BUILD_DIR/"
+cp /tmp/camera-viewer-app.tar.gz "\$CV_OUT_DIR/"
+
+echo "→ Spazio disponibile:"
+df -h "\$HOME" | tail -1
 
 echo "→ Avvio container Ubuntu amd64 con accesso privilegiato..."
 
 # Container Ubuntu dentro la VM = loop device reali disponibili
 sudo podman run --rm --privileged \
     --platform linux/amd64 \
-    -v /tmp/cv-build:/setup:z \
-    -v /tmp/cv-output:/output:z \
+    -v "\$CV_BUILD_DIR":/setup:z \
+    -v "\$CV_OUT_DIR":/output:z \
     ubuntu:24.04 \
     bash /setup/build_image_inside.sh "$VERSION" "/output" "/output/camera-viewer-app.tar.gz"
 
 echo "→ Build completato!"
-ls -lh /tmp/cv-output/
+ls -lh "\$CV_OUT_DIR/"
 SSHEOF
 
 # Copia immagine dalla VM al Mac
 info "Copia immagine compressa dal Mac..."
 mkdir -p "$OUTPUT_DIR"
-scp "${SCP_OPTS[@]}" "${SSH_HOST}:/tmp/cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
+scp "${SCP_OPTS[@]}" "${SSH_HOST}:cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
 
 # ── Step 4: Verifica ─────────────────────────────────────────────────────────
 step 4 "Verifica output..."
