@@ -368,3 +368,92 @@ def delete_user(user_id: str) -> bool:
         return True
 
     return mutate(_apply)
+
+
+# ── VPN Profiles ──────────────────────────────────────────────────────────────
+
+_VPN_SENSITIVE = ("conf_text", "password", "private_key", "preshared_key")
+
+
+def list_vpn_profiles(mask_sensitive: bool = True) -> list[dict]:
+    """Return profiles. With mask_sensitive=True passwords are hidden."""
+    profiles = load_config().get("vpn_profiles", [])
+    if not mask_sensitive:
+        return profiles
+    result = []
+    for p in profiles:
+        safe = {k: ("••••" if k in _VPN_SENSITIVE and v else v)
+                for k, v in p.items()}
+        result.append(safe)
+    return result
+
+
+def get_vpn_profile_raw(profile_id: str) -> dict | None:
+    """Return full profile including sensitive fields."""
+    for p in load_config().get("vpn_profiles", []):
+        if p.get("id") == profile_id:
+            return p
+    return None
+
+
+def upsert_vpn_profile(profile: dict) -> dict:
+    """Create or update a VPN profile. Merges sensitive fields if masked."""
+    pid = profile.get("id") or uuid.uuid4().hex[:8]
+
+    def _apply(cfg):
+        profiles = cfg.setdefault("vpn_profiles", [])
+        existing = next((p for p in profiles if p.get("id") == pid), None)
+        entry = {
+            "id": pid,
+            "name": (profile.get("name") or "Profilo VPN").strip(),
+            "protocol": profile.get("protocol", "openvpn"),
+            "camera_subnets": profile.get("camera_subnets", []),
+            "auto_connect": bool(profile.get("auto_connect", True)),
+            "active": existing.get("active", False) if existing else False,
+        }
+        # Preserve sensitive fields when placeholder "••••" is received
+        for key in _VPN_SENSITIVE:
+            new_val = profile.get(key, "")
+            if new_val and new_val != "••••":
+                entry[key] = new_val
+            elif existing:
+                entry[key] = existing.get(key, "")
+            else:
+                entry[key] = ""
+        # Preserve username (not sensitive but may not change)
+        entry["username"] = profile.get("username") or (existing or {}).get("username", "")
+
+        if existing:
+            profiles[profiles.index(existing)] = entry
+        else:
+            profiles.append(entry)
+        return entry
+
+    return mutate(_apply)
+
+
+def delete_vpn_profile(profile_id: str) -> bool:
+    def _apply(cfg):
+        before = len(cfg.get("vpn_profiles", []))
+        cfg["vpn_profiles"] = [p for p in cfg.get("vpn_profiles", [])
+                               if p.get("id") != profile_id]
+        return len(cfg["vpn_profiles"]) < before
+
+    return mutate(_apply)
+
+
+def set_vpn_profile_active(profile_id: str | None) -> None:
+    """Mark one profile as active, deactivate all others."""
+    def _apply(cfg):
+        for p in cfg.get("vpn_profiles", []):
+            p["active"] = (p.get("id") == profile_id)
+
+    mutate(_apply)
+
+
+def get_active_vpn_profile() -> dict | None:
+    """Return the currently active profile (full data)."""
+    for p in load_config().get("vpn_profiles", []):
+        if p.get("active"):
+            return p
+    return None

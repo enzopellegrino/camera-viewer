@@ -449,43 +449,141 @@ $('#wallpaper-reset')?.addEventListener('click', async () => {
   }
 });
 
-// ── VPN ───────────────────────────────────────────────────────────────────
+// ── VPN Profiles ──────────────────────────────────────────────────────────
+let _vpnProfiles = [], _vpnActiveId = null, _editingVpnId = null;
+
 async function loadVpnStatus() {
-  const { data } = await api('/api/vpn');
+  const [statusRes, profilesRes] = await Promise.all([
+    api('/api/vpn'),
+    api('/api/vpn/profiles'),
+  ]);
+  const st = statusRes.data;
   const ind = $('#vpn-status-indicator'), txt = $('#vpn-status-text'), sub = $('#vpn-status-sub');
-  const disBtn = $('#vpn-disable-btn'), vpnForm = $('#vpn-form');
-  if (data.active) {
+  if (st.active) {
     ind.className = 'status-indicator active'; ind.textContent = '🔒';
-    txt.textContent = `${data.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'} attivo`;
-    sub.textContent = data.ip || '';
-    disBtn.hidden = false;
-    if (vpnForm) vpnForm.hidden = true;
+    txt.textContent = `${st.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'} attivo`;
+    sub.textContent = st.ip || '';
   } else {
     ind.className = 'status-indicator'; ind.textContent = '🔓';
-    txt.textContent = 'VPN non attiva';
-    sub.textContent = data.configured ? 'Configurata, non connessa' : '';
-    disBtn.hidden = true;
-    if (vpnForm && _currentUser?.role === 'admin') vpnForm.hidden = false;
+    txt.textContent = 'Nessun tunnel attivo';
+    sub.textContent = '';
   }
-  // Pre-fill subnets
-  const subnets = data.camera_subnets || [];
-  const ta = $('#vpn-subnets');
-  if (ta && subnets.length && !ta.value) ta.value = subnets.join('\n');
+  _vpnProfiles = profilesRes.data?.profiles || [];
+  _vpnActiveId = profilesRes.data?.active_id || null;
+  renderVpnProfiles();
 }
 
-$('#vpn-disable-btn')?.addEventListener('click', async () => {
-  const { ok, data } = await api('/api/vpn/disable', { method: 'POST' });
+function renderVpnProfiles() {
+  const list = $('#vpn-profiles-list');
+  if (!list) return;
+  if (!_vpnProfiles.length) {
+    list.innerHTML = `<div class="card text-muted" style="text-align:center;padding:24px">
+      <div style="font-size:2rem;margin-bottom:8px">🔓</div>
+      <p>Nessun profilo VPN configurato.</p>
+      <p style="margin-top:6px;font-size:.8rem">Aggiungi un profilo con il pulsante "+ Nuovo profilo".</p>
+    </div>`;
+    return;
+  }
+  const isAdmin = _currentUser?.role === 'admin';
+  list.innerHTML = _vpnProfiles.map(p => {
+    const isActive = p.id === _vpnActiveId;
+    const subnets = (p.camera_subnets || []).map(s =>
+      `<span class="subnet-pill">${esc(s)}</span>`).join(' ');
+    const protoBadge = `<span class="proto-badge">${p.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'}</span>`;
+    const autoTag = p.auto_connect ? `<span class="proto-badge" style="background:rgba(245,166,35,.1);color:var(--warning);border-color:rgba(245,166,35,.25)">🔄 auto</span>` : '';
+
+    return `
+    <div class="vpn-profile-card ${isActive ? 'is-active' : ''}">
+      <div class="vpn-profile-head">
+        <div class="vpn-profile-icon">${isActive ? '🔒' : '🔓'}</div>
+        <div class="vpn-profile-meta">
+          <div class="vpn-profile-name">${esc(p.name)}</div>
+          <div class="vpn-profile-proto">${protoBadge}${autoTag}${subnets}</div>
+        </div>
+      </div>
+      <div class="vpn-profile-actions">
+        ${isActive
+          ? `<span class="active-badge-vpn">Attivo</span>
+             ${isAdmin ? `<button class="btn btn-sm btn-danger" onclick="deactivateVpn('${p.id}')">Disattiva</button>` : ''}`
+          : `${isAdmin ? `<button class="btn btn-primary btn-sm" onclick="activateVpn('${p.id}')">▶ Attiva</button>` : ''}`}
+        ${isAdmin ? `
+        <button class="btn-icon" onclick="editVpnProfile('${p.id}')" title="Modifica">
+          <svg viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="btn-icon danger" onclick="deleteVpnProfile('${p.id}','${esc(p.name)}')" title="Elimina">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+window.activateVpn = async id => {
+  const p = _vpnProfiles.find(x => x.id === id);
+  const btn = document.querySelector(`[onclick="activateVpn('${id}')"]`);
+  if (btn) { btn.disabled = true; btn.textContent = 'Connessione…'; }
+  const { ok, data } = await api(`/api/vpn/profiles/${id}/activate`, { method: 'POST' });
+  toast(data.message || (ok ? 'VPN attivata' : 'Errore'), ok ? 'ok' : 'err');
+  await loadVpnStatus();
+};
+
+window.deactivateVpn = async id => {
+  const { ok, data } = await api(`/api/vpn/profiles/${id}/deactivate`, { method: 'POST' });
   toast(data.message || (ok ? 'VPN disattivata' : 'Errore'), ok ? 'ok' : 'err');
-  if (ok) loadVpnStatus();
+  await loadVpnStatus();
+};
+
+window.editVpnProfile = id => {
+  _editingVpnId = id;
+  const p = _vpnProfiles.find(x => x.id === id);
+  if (!p) return;
+  $('#vpn-form-title').textContent = 'Modifica profilo';
+  $('#vpn-name').value = p.name;
+  $('#vpn-autoconnect').checked = !!p.auto_connect;
+  $('#vpn-subnets').value = (p.camera_subnets || []).join('\n');
+  // Set protocol
+  const proto = p.protocol || 'openvpn';
+  $$('#vpn-proto-seg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.val === proto));
+  $('#ovpn-section').hidden = proto !== 'openvpn';
+  $('#wg-section').hidden = proto !== 'wireguard';
+  $('#ovpn-user').value = p.username || '';
+  $('#ovpn-pass').value = '';  // don't prefill password
+  $('#ovpn-label').textContent = p.conf_text ? '📄 Config salvata (carica per sostituire)' : '📂 Scegli il file .ovpn';
+  $('#vpn-profile-form').classList.remove('hidden');
+  $('#vpn-name').focus();
+};
+
+window.deleteVpnProfile = async (id, name) => {
+  if (!confirm(`Eliminare il profilo "${name}"?`)) return;
+  const { ok, data } = await api(`/api/vpn/profiles/${id}`, { method: 'DELETE' });
+  toast(data.message || (ok ? 'Profilo eliminato' : 'Errore'), ok ? 'ok' : 'err');
+  if (ok) await loadVpnStatus();
+};
+
+$('#add-vpn-btn')?.addEventListener('click', () => {
+  _editingVpnId = null;
+  $('#vpn-form-title').textContent = 'Nuovo profilo VPN';
+  $('#vpn-name').value = '';
+  $('#ovpn-user').value = ''; $('#ovpn-pass').value = '';
+  $('#vpn-subnets').value = ''; $('#vpn-autoconnect').checked = true;
+  $('#ovpn-label').textContent = '📂 Scegli o trascina il file .ovpn';
+  $('#wg-label').textContent = '📂 Scegli il file WireGuard .conf';
+  $$('#vpn-proto-seg .seg-btn').forEach((b,i) => b.classList.toggle('active', i === 0));
+  $('#ovpn-section').hidden = false; $('#wg-section').hidden = true;
+  $('#vpn-profile-form').classList.remove('hidden');
+  $('#vpn-name').focus();
+});
+
+$('#vpn-profile-cancel')?.addEventListener('click', () => {
+  $('#vpn-profile-form').classList.add('hidden');
 });
 
 // Proto seg
 $$('#vpn-proto-seg .seg-btn').forEach(b => b.addEventListener('click', () => {
   $$('#vpn-proto-seg .seg-btn').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
-  const val = b.dataset.val;
-  $('#ovpn-section').hidden = val !== 'openvpn';
-  $('#wg-section').hidden = val !== 'wireguard';
+  $('#ovpn-section').hidden = b.dataset.val !== 'openvpn';
+  $('#wg-section').hidden = b.dataset.val !== 'wireguard';
 }));
 
 // WG mode seg
@@ -496,33 +594,39 @@ $$('#wg-mode-seg .seg-btn').forEach(b => b.addEventListener('click', () => {
   $('#wg-manual-box').hidden = b.dataset.val !== 'manual';
 }));
 
-// OVPN file
 $('#ovpn-drop')?.addEventListener('click', () => $('#ovpn-file').click());
 $('#ovpn-file')?.addEventListener('change', () => {
   const f = $('#ovpn-file').files[0];
-  if (f) { $('#ovpn-label').textContent = '📄 ' + f.name; }
+  if (f) $('#ovpn-label').textContent = '📄 ' + f.name;
 });
-
-// WG file
 $('#wg-drop')?.addEventListener('click', () => $('#wg-file').click());
 $('#wg-file')?.addEventListener('change', () => {
   const f = $('#wg-file').files[0];
-  if (f) { $('#wg-label').textContent = '📄 ' + f.name; }
+  if (f) $('#wg-label').textContent = '📄 ' + f.name;
 });
 
-$('#vpn-apply-btn')?.addEventListener('click', async () => {
-  const btn = $('#vpn-apply-btn'); btn.disabled = true; btn.textContent = 'Applicazione…';
+$('#vpn-profile-save')?.addEventListener('click', async () => {
+  const name = $('#vpn-name').value.trim();
+  if (!name) { toast('Il nome è obbligatorio', 'err'); return; }
+
+  const btn = $('#vpn-profile-save');
+  btn.disabled = true; btn.textContent = 'Salvataggio…';
+
   const proto = ($('#vpn-proto-seg .seg-btn.active') || {}).dataset?.val || 'openvpn';
   const subnets = $('#vpn-subnets').value.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
-  const enable_on_boot = $('#vpn-autoconnect').checked;
 
-  let body = { protocol: proto, camera_subnets: subnets, enable_on_boot };
+  const body = {
+    id: _editingVpnId || undefined,
+    name, protocol: proto,
+    camera_subnets: subnets,
+    auto_connect: $('#vpn-autoconnect').checked,
+    username: $('#ovpn-user').value,
+    password: $('#ovpn-pass').value || '••••',  // preserve if not changed
+  };
 
   if (proto === 'openvpn') {
     const f = $('#ovpn-file').files[0];
     if (f) body.conf_text = await f.text();
-    body.username = $('#ovpn-user').value;
-    body.password = $('#ovpn-pass').value;
   } else {
     const mode = ($('#wg-mode-seg .seg-btn.active') || {}).dataset?.val || 'file';
     if (mode === 'file') {
@@ -530,25 +634,23 @@ $('#vpn-apply-btn')?.addEventListener('click', async () => {
       if (f) { body.mode = 'file'; body.conf_text = await f.text(); }
     } else {
       body.mode = 'manual';
-      body.private_key = $('#wg-private-key').value;
+      body.private_key = $('#wg-private-key').value || '••••';
       body.address = $('#wg-address').value;
       body.peer_public_key = $('#wg-peer-pub').value;
-      body.preshared_key = $('#wg-psk').value || undefined;
+      body.preshared_key = $('#wg-psk').value || '••••';
       body.endpoint = $('#wg-endpoint').value;
     }
   }
 
-  const { ok, data } = await api('/api/vpn', { method: 'POST', body: JSON.stringify(body) });
-  toast(data.message || (ok ? 'Tunnel configurato' : 'Errore'), ok ? 'ok' : 'err');
-  btn.disabled = false; btn.textContent = 'Applica tunnel';
-  if (ok) loadVpnStatus();
-});
-
-$('#vpn-remove-btn')?.addEventListener('click', async () => {
-  if (!confirm('Rimuovere la configurazione VPN?')) return;
-  const { ok, data } = await api('/api/vpn', { method: 'DELETE' });
-  toast(data.message || (ok ? 'VPN rimossa' : 'Errore'), ok ? 'ok' : 'err');
-  if (ok) { $('#vpn-subnets').value = ''; loadVpnStatus(); }
+  const url = _editingVpnId ? `/api/vpn/profiles/${_editingVpnId}` : '/api/vpn/profiles';
+  const method = _editingVpnId ? 'PUT' : 'POST';
+  const { ok, data } = await api(url, { method, body: JSON.stringify(body) });
+  toast(data.message || (ok ? 'Profilo salvato' : 'Errore'), ok ? 'ok' : 'err');
+  btn.disabled = false; btn.textContent = 'Salva profilo';
+  if (ok) {
+    $('#vpn-profile-form').classList.add('hidden');
+    await loadVpnStatus();
+  }
 });
 
 // ── Users ─────────────────────────────────────────────────────────────────

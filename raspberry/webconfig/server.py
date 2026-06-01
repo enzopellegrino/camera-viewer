@@ -570,6 +570,107 @@ def api_placeholder_delete():
     return jsonify({"ok": True, "message": "Logo rimosso"})
 
 
+# ── API: VPN Profiles ────────────────────────────────────────────────────────
+
+@app.route("/api/vpn/profiles", methods=["GET"])
+@login_required()
+def api_vpn_profiles_list():
+    return jsonify({
+        "profiles": store.list_vpn_profiles(mask_sensitive=True),
+        "active_id": (store.get_active_vpn_profile() or {}).get("id"),
+    })
+
+
+@app.route("/api/vpn/profiles", methods=["POST"])
+@login_required(admin=True)
+def api_vpn_profiles_create():
+    data = request.get_json(force=True, silent=True) or {}
+    if not (data.get("name") or "").strip():
+        return jsonify({"ok": False, "message": "Il nome del profilo è obbligatorio"}), 400
+    profile = store.upsert_vpn_profile(data)
+    return jsonify({"ok": True, "profile": {k: v for k, v in profile.items()
+                                             if k not in store._VPN_SENSITIVE}})
+
+
+@app.route("/api/vpn/profiles/<pid>", methods=["PUT"])
+@login_required(admin=True)
+def api_vpn_profiles_update(pid: str):
+    data = request.get_json(force=True, silent=True) or {}
+    data["id"] = pid
+    if not (data.get("name") or "").strip():
+        return jsonify({"ok": False, "message": "Il nome del profilo è obbligatorio"}), 400
+    profile = store.upsert_vpn_profile(data)
+    return jsonify({"ok": True, "profile": {k: v for k, v in profile.items()
+                                             if k not in store._VPN_SENSITIVE}})
+
+
+@app.route("/api/vpn/profiles/<pid>", methods=["DELETE"])
+@login_required(admin=True)
+def api_vpn_profiles_delete(pid: str):
+    # Deactivate before deleting if it's active
+    active = store.get_active_vpn_profile()
+    if active and active.get("id") == pid:
+        vpn.disable()
+        vpn_openvpn.disable()
+        store.set_vpn_profile_active(None)
+    ok = store.delete_vpn_profile(pid)
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/vpn/profiles/<pid>/activate", methods=["POST"])
+@login_required(admin=True)
+def api_vpn_profiles_activate(pid: str):
+    """Activate a VPN profile: apply the tunnel and mark it as active."""
+    profile = store.get_vpn_profile_raw(pid)
+    if not profile:
+        return jsonify({"ok": False, "message": "Profilo non trovato"}), 404
+
+    subnets = profile.get("camera_subnets", [])
+    enable_on_boot = profile.get("auto_connect", True)
+    protocol = profile.get("protocol", "openvpn")
+
+    # Tear down any existing tunnel first
+    vpn.disable()
+    vpn_openvpn.disable()
+
+    if protocol == "openvpn":
+        ok, msg = vpn_openvpn.apply_config(
+            profile.get("conf_text", ""),
+            subnets,
+            username=profile.get("username", ""),
+            password=profile.get("password", ""),
+            enable_on_boot=enable_on_boot,
+        )
+    else:
+        # WireGuard
+        try:
+            if profile.get("mode") == "file" or profile.get("conf_text"):
+                fields = vpn.parse_wg_conf(profile.get("conf_text", ""))
+            else:
+                fields = {k: profile.get(k, "") for k in
+                          ("private_key", "address", "peer_public_key",
+                           "preshared_key", "endpoint")}
+            conf_text = vpn.build_split_tunnel_conf(fields, subnets)
+        except ValueError as e:
+            return jsonify({"ok": False, "message": str(e)}), 400
+        ok, msg = vpn.apply_config(conf_text, enable_on_boot=enable_on_boot)
+
+    if ok:
+        store.set_vpn_profile_active(pid)
+
+    return jsonify({"ok": ok, "message": msg})
+
+
+@app.route("/api/vpn/profiles/<pid>/deactivate", methods=["POST"])
+@login_required(admin=True)
+def api_vpn_profiles_deactivate(pid: str):
+    """Deactivate the VPN tunnel and clear the active flag."""
+    ok1, _ = vpn.disable()
+    ok2, _ = vpn_openvpn.disable()
+    store.set_vpn_profile_active(None)
+    return jsonify({"ok": True, "message": "VPN disattivata"})
+
+
 # ── API: VPN (WireGuard split-tunnel) ────────────────────────────────────────
 
 def _parse_subnets(value) -> list[str]:

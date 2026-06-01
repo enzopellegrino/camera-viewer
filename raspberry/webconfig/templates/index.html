@@ -139,21 +139,34 @@
 
     <!-- ── VPN ────────────────────────────────────────────────────── -->
     <section id="tab-vpn" class="panel">
-      <div class="panel-head"><h2>VPN</h2></div>
+      <div class="panel-head">
+        <h2>VPN</h2>
+        <button class="btn btn-primary admin-only" id="add-vpn-btn">+ Nuovo profilo</button>
+      </div>
 
+      <!-- Stato corrente -->
       <div class="card" id="vpn-state-card">
         <div class="vpn-status-row">
-          <div class="status-indicator" id="vpn-status-indicator"></div>
-          <div>
-            <div class="label-bold" id="vpn-status-text">Caricamento…</div>
+          <div class="status-indicator" id="vpn-status-indicator">🔓</div>
+          <div style="flex:1">
+            <div class="label-bold" id="vpn-status-text">Nessun tunnel attivo</div>
             <div class="label-muted" id="vpn-status-sub"></div>
           </div>
-          <button class="btn btn-sm" id="vpn-disable-btn" hidden>Disattiva</button>
         </div>
       </div>
 
-      <div id="vpn-form" class="card form-card admin-only" hidden>
-        <h3>Configura tunnel</h3>
+      <!-- Lista profili -->
+      <div id="vpn-profiles-list"></div>
+
+      <!-- Form crea/modifica profilo -->
+      <div id="vpn-profile-form" class="card form-card admin-only hidden">
+        <h3 id="vpn-form-title">Nuovo profilo VPN</h3>
+
+        <div class="field">
+          <label>Nome profilo</label>
+          <input id="vpn-name" placeholder="Es. Stadio Milano"/>
+        </div>
+
         <div class="seg-ctrl" id="vpn-proto-seg">
           <button class="seg-btn active" data-val="openvpn">OpenVPN</button>
           <button class="seg-btn" data-val="wireguard">WireGuard</button>
@@ -169,8 +182,8 @@
             </label>
           </div>
           <div class="fields-row">
-            <div class="field flex1"><label>Username</label><input id="ovpn-user"/></div>
-            <div class="field flex1"><label>Password</label><input id="ovpn-pass" type="password"/></div>
+            <div class="field flex1"><label>Username</label><input id="ovpn-user" placeholder="(opzionale)"/></div>
+            <div class="field flex1"><label>Password</label><input id="ovpn-pass" type="password" placeholder="(opzionale)"/></div>
           </div>
         </div>
 
@@ -196,7 +209,7 @@
         </div>
 
         <div class="field">
-          <label>Subnet telecamere (una per riga)</label>
+          <label>Subnet telecamere (una per riga, es. 10.10.90.0/24)</label>
           <textarea id="vpn-subnets" rows="2" placeholder="10.10.90.0/24"></textarea>
         </div>
 
@@ -206,8 +219,8 @@
         </div>
 
         <div class="form-actions">
-          <button class="btn btn-primary" id="vpn-apply-btn">Applica tunnel</button>
-          <button class="btn btn-danger" id="vpn-remove-btn">Rimuovi</button>
+          <button class="btn btn-primary" id="vpn-profile-save">Salva profilo</button>
+          <button class="btn" id="vpn-profile-cancel">Annulla</button>
         </div>
       </div>
     </section>
