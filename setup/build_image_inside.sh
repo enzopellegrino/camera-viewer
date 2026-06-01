@@ -78,9 +78,10 @@ mkfs.ext4 -L  "cv-system"     "${LOOP}p2" -q
 mkfs.ext4 -L  "cv-data"       "${LOOP}p3" -q
 ok "Filesystem creati"
 
-mkdir -p /target/boot/efi /cv-data
-mount "${LOOP}p2" /target
-mount "${LOOP}p1" /target/boot/efi
+mkdir -p /target /cv-data
+mount "${LOOP}p2" /target          # monta root prima
+mkdir -p /target/boot/efi          # crea la dir DENTRO il filesystem montato
+mount "${LOOP}p1" /target/boot/efi # poi monta EFI
 mount "${LOOP}p3" /cv-data
 
 # ── Debootstrap Ubuntu 24.04 minimal ─────────────────────────────────────────
