@@ -492,10 +492,14 @@ losetup -d "$LOOP" 2>/dev/null || true
 ok "Smontaggio completato"
 
 # ── Comprimi con xz ───────────────────────────────────────────────────────────
-log "Compressione immagine (richiede 5-10 min)..."
+log "Compressione immagine..."
 RAW_SIZE=$(ls -lh "$IMG_FILE" | awk '{print $5}')
 info "Raw size: $RAW_SIZE"
-xz -9 -T0 "$IMG_FILE"
+# Usa xz -6 per default (buon bilanciamento velocità/dimensione)
+# Per massima compressione usa: XZ_LEVEL=9 bash make-image.sh
+XZ_LEVEL="${XZ_LEVEL:-6}"
+info "Livello compressione: -${XZ_LEVEL} (per produzione usa XZ_LEVEL=9)"
+xz -${XZ_LEVEL} -T0 "$IMG_FILE"
 COMPRESSED="${IMG_FILE}.xz"
 COMP_SIZE=$(ls -lh "$COMPRESSED" | awk '{print $5}')
 ok "Compressione completata: $COMP_SIZE (era $RAW_SIZE)"

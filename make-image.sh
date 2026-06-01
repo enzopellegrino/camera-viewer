@@ -30,6 +30,110 @@ hdr() {
     echo -e "${E}"
 }
 
+# ── Modalità repair GRUB ──────────────────────────────────────────────────────
+# Uso: bash make-image.sh --repair-grub
+# Ripara solo il GRUB sull'immagine esistente senza ricostruire tutto.
+# Richiede l'immagine compressa in dist/. Durata: ~5 min.
+if [[ "${1:-}" == "--repair-grub" ]]; then
+    hdr
+    echo -e "  ${Y}Modalità REPAIR GRUB${E} — ripara bootloader senza ricostruire l'immagine"
+    echo ""
+    [ -f "$OUTPUT_IMG" ] || err "Immagine non trovata: $OUTPUT_IMG\n  Esegui prima: bash make-image.sh"
+
+    # Ottieni SSH info VM
+    VM_NAME=$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 | tr -d '* ')
+    VM_JSON=$(podman machine inspect "$VM_NAME" 2>/dev/null)
+    SSH_PORT=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['Port'])")
+    SSH_KEY=$(echo "$VM_JSON"  | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['IdentityPath'])")
+    SSH_USER=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['RemoteUsername'])")
+    SSH_OPTS=(-i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=no -o LogLevel=ERROR)
+    SCP_OPTS=(-i "$SSH_KEY" -P "$SSH_PORT" -o StrictHostKeyChecking=no -o LogLevel=ERROR)
+    SSH_HOST="${SSH_USER}@localhost"
+
+    echo "[1/4] Copia immagine compressa nella VM..."
+    scp "${SCP_OPTS[@]}" "$OUTPUT_IMG" "${SSH_HOST}:cv-output/"
+
+    echo "[2/4] Decomprimi e ripara GRUB nella VM..."
+    ssh "${SSH_OPTS[@]}" "$SSH_HOST" << REPAIREOF
+set -e
+sudo modprobe loop max_loop=16 2>/dev/null || true
+cd \$HOME/cv-output/
+
+# Decomprimi se non esiste già il raw
+IMG_RAW="camera-viewer-v${VERSION}.img"
+if [ ! -f "\$IMG_RAW" ]; then
+    echo "Decomprimo immagine..."
+    xz -d -k camera-viewer-v${VERSION}.img.xz
+fi
+
+# Monta immagine
+LOOP=\$(sudo losetup -f --show -P "\$IMG_RAW")
+echo "Loop: \$LOOP"
+sudo partprobe "\$LOOP" 2>/dev/null || true
+sleep 1
+
+# Monta sistema
+sudo mkdir -p /mnt/cv-repair/boot/efi
+sudo mount \${LOOP}p2 /mnt/cv-repair
+sudo mount \${LOOP}p1 /mnt/cv-repair/boot/efi
+for d in dev dev/pts proc sys run; do sudo mount --bind /\$d /mnt/cv-repair/\$d; done
+
+# Reinstalla GRUB fuori dal chroot (fix principale)
+sudo grub-install --target=x86_64-efi \
+    --efi-directory=/mnt/cv-repair/boot/efi \
+    --boot-directory=/mnt/cv-repair/boot \
+    --removable --recheck "\$LOOP" 2>&1 | tail -3
+
+# Aggiorna grub.cfg con kernel reale
+KERNEL=\$(ls /mnt/cv-repair/boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/mnt/cv-repair||')
+INITRD=\$(ls /mnt/cv-repair/boot/initrd.img-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/mnt/cv-repair||')
+echo "Kernel: \$KERNEL"
+sudo tee /mnt/cv-repair/boot/grub/grub.cfg > /dev/null << EOF
+set timeout=8
+set default=0
+set color_normal=cyan/black
+set color_highlight=black/cyan
+set menu_color_normal=white/black
+set menu_color_highlight=black/cyan
+echo "  Camera Viewer v${VERSION}"
+echo "  di Enzo Pellegrino"
+menuentry " Avvia Camera Viewer" {
+    search --no-floppy --label --set=root cv-system
+    linux  \${KERNEL} root=LABEL=cv-system rw quiet loglevel=3
+    initrd \${INITRD}
+}
+menuentry " Modalita sicura (nomodeset)" {
+    search --no-floppy --label --set=root cv-system
+    linux  \${KERNEL} root=LABEL=cv-system rw nomodeset loglevel=3
+    initrd \${INITRD}
+}
+EOF
+
+# Smonta
+for d in run sys proc dev/pts dev; do sudo umount /mnt/cv-repair/\$d 2>/dev/null || true; done
+sudo umount /mnt/cv-repair/boot/efi 2>/dev/null || true
+sudo umount /mnt/cv-repair 2>/dev/null || true
+sudo losetup -d "\$LOOP" 2>/dev/null || true
+
+echo "GRUB riparato!"
+REPAIREOF
+
+    echo "[3/4] Ricomprimi immagine (veloce, xz -3)..."
+    ssh "${SSH_OPTS[@]}" "$SSH_HOST" \
+        "cd \$HOME/cv-output/ && rm -f camera-viewer-v${VERSION}.img.xz && XZ_LEVEL=3 xz -3 -T0 camera-viewer-v${VERSION}.img && ls -lh camera-viewer-v${VERSION}.img.xz"
+
+    echo "[4/4] Copia immagine riparata..."
+    scp "${SCP_OPTS[@]}" "${SSH_HOST}:cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
+    SIZE=$(ls -lh "$OUTPUT_IMG" | awk '{print $5}')
+
+    echo ""
+    echo -e "${G}${B}╔══════════════════════════════════════════════════╗${E}"
+    echo -e "${G}${B}║  ✅ GRUB riparato! ($SIZE)                       ║${E}"
+    echo -e "${G}${B}║  Scrivi sulla USB: bash make-usb.sh              ║${E}"
+    echo -e "${G}${B}╚══════════════════════════════════════════════════╝${E}"
+    exit 0
+fi
+
 ok()   { echo -e "  ${G}✓${E} $1"; }
 warn() { echo -e "  ${Y}⚠${E}  $1"; }
 err()  { echo -e "  ${R}✗ ERRORE:${E} $1"; exit 1; }
