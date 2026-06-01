@@ -1,551 +1,654 @@
-"use strict";
+/* Camera Viewer — Portal app.js v2.0 */
+'use strict';
 
-const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+// ── Helpers ───────────────────────────────────────────────────────────────
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
 
-async function api(path, opts) {
-  const res = await fetch(path, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
-  let data = {};
-  try { data = await res.json(); } catch (_) {}
-  return { ok: res.ok, data };
+let _currentUser = null;
+
+async function api(url, opts = {}) {
+  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+  try {
+    const res = await fetch(url, { ...opts, headers });
+    if (res.status === 401) { window.location.href = '/login'; return { ok: false, data: {} }; }
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, data };
+  } catch (e) {
+    return { ok: false, data: { message: 'Errore di rete' } };
+  }
 }
 
-function toast(msg, kind) {
-  const t = $("#toast");
+let _toastTimer;
+function toast(msg, type = 'ok') {
+  const t = $('#toast');
   t.textContent = msg;
-  t.className = "toast" + (kind ? " toast--" + kind : "");
+  t.className = 'toast ' + type;
   t.hidden = false;
-  clearTimeout(toast._t);
-  toast._t = setTimeout(() => { t.hidden = true; }, 3000);
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => { t.hidden = true; }, 3200);
 }
 
-// ── Tabs ──────────────────────────────────────────────────────────────────
-$$(".tab").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    $$(".tab").forEach((b) => b.classList.remove("is-active"));
-    $$(".panel").forEach((p) => p.classList.remove("is-active"));
-    btn.classList.add("is-active");
-    $("#tab-" + btn.dataset.tab).classList.add("is-active");
-  });
+// ── Navigation ────────────────────────────────────────────────────────────
+function switchTab(name) {
+  $$('.nav-item').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
+  $$('.bnav-item').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
+  $$('.panel').forEach(el => el.classList.toggle('active', el.id === 'tab-' + name));
+  // Close sidebar on mobile
+  if (window.innerWidth <= 768) $('#sidebar').classList.remove('open');
+}
+
+$$('[data-tab]').forEach(el => {
+  el.addEventListener('click', () => switchTab(el.dataset.tab));
 });
 
-// ── Status ─────────────────────────────────────────────────────────────────
-async function refreshStatus() {
-  const { data } = await api("/api/status");
-  const el = $("#status");
-  const txt = $("#status-text");
-  if (data.online) {
-    el.className = "status status--on";
-    if (data.type === "wifi") txt.textContent = `WiFi: ${data.ssid || "?"} · ${data.ip || ""}`;
-    else txt.textContent = `Ethernet · ${data.ip || ""}`;
+$('#menu-btn').addEventListener('click', () => {
+  $('#sidebar').classList.toggle('open');
+});
+
+document.addEventListener('click', e => {
+  const sidebar = $('#sidebar');
+  if (window.innerWidth <= 768 && sidebar.classList.contains('open')
+      && !sidebar.contains(e.target) && !$('#menu-btn').contains(e.target)) {
+    sidebar.classList.remove('open');
+  }
+});
+
+// ── Role visibility ───────────────────────────────────────────────────────
+function applyRole(role) {
+  const isAdmin = role === 'admin';
+  $$('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin));
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────
+async function initAuth() {
+  const { ok, data } = await api('/api/auth/me');
+  if (!ok) { window.location.href = '/login'; return false; }
+  _currentUser = data;
+  $('#user-name').textContent = data.username;
+  $('#user-avatar').textContent = data.username[0].toUpperCase();
+  $('#user-role-label').textContent = data.role === 'admin' ? 'Amministratore' : 'Operatore';
+  applyRole(data.role);
+  return true;
+}
+
+$('#logout-btn').addEventListener('click', async () => {
+  await api('/api/auth/logout', { method: 'POST' });
+  window.location.href = '/login';
+});
+
+// ── Site name & status ────────────────────────────────────────────────────
+async function loadSiteName() {
+  const { data } = await api('/api/site-name');
+  const name = data.name || 'Camera Viewer';
+  $('#brand-name').textContent = name;
+  $('#site-title').textContent = name;
+  document.title = name;
+  const inp = $('#site-name-input');
+  if (inp) inp.value = name;
+}
+
+$('#site-name-save')?.addEventListener('click', async () => {
+  const { ok, data } = await api('/api/site-name', {
+    method: 'POST', body: JSON.stringify({ name: $('#site-name-input').value })
+  });
+  if (ok) { toast('Nome aggiornato', 'ok'); loadSiteName(); }
+  else toast(data.message || 'Errore', 'err');
+});
+
+async function loadStatus() {
+  const { ok, data } = await api('/api/status');
+  const dot = $('#status-dot'), txt = $('#status-text'), ip = $('#ip-badge');
+  if (ok && data.online) {
+    dot.className = 'status-dot online';
+    txt.textContent = data.type === 'wifi' ? `WiFi: ${data.ssid}` : 'Ethernet';
+    ip.textContent = data.ip || '';
   } else {
-    el.className = "status status--off";
-    txt.textContent = "Non connesso";
+    dot.className = 'status-dot offline';
+    txt.textContent = 'Non connesso';
+    ip.textContent = '';
   }
 }
 
-// ── Network mode toggle ──────────────────────────────────────────────────────
-$("#mode-eth").addEventListener("click", () => setMode("eth"));
-$("#mode-wifi").addEventListener("click", () => setMode("wifi"));
-
-function setMode(mode) {
-  const eth = mode === "eth";
-  $("#mode-eth").classList.toggle("is-active", eth);
-  $("#mode-wifi").classList.toggle("is-active", !eth);
-  $("#eth-box").hidden = !eth;
-  $("#wifi-box").hidden = eth;
-  api("/api/network/mode", { method: "POST", body: JSON.stringify({ mode: eth ? "dhcp" : "wifi" }) });
-}
-
-// ── WiFi ─────────────────────────────────────────────────────────────────────
-$("#scan-btn").addEventListener("click", scanWifi);
-
-async function scanWifi() {
-  $("#scan-btn").textContent = "Ricerca in corso…";
-  const { data } = await api("/api/wifi/scan");
-  $("#scan-btn").textContent = "🔄 Cerca reti WiFi";
-  const list = $("#wifi-list");
-  list.innerHTML = "";
-  if (!data.networks || data.networks.length === 0) {
-    list.innerHTML = '<li class="empty">Nessuna rete trovata</li>';
-    return;
-  }
-  data.networks.forEach((n) => {
-    const li = document.createElement("li");
-    const locked = n.security && n.security !== "open" && n.security !== "";
-    li.innerHTML = `<div class="meta"><span>${escapeHtml(n.ssid)} ${n.in_use ? "✓" : ""}</span>
-      <span class="sig">Segnale ${n.signal}%</span></div>
-      <span class="lock">${locked ? "🔒" : "🔓"}</span>`;
-    li.addEventListener("click", () => selectWifi(n));
-    list.appendChild(li);
-  });
-}
-
-function selectWifi(n) {
-  $("#wifi-ssid").textContent = n.ssid;
-  $("#wifi-pass").value = "";
-  $("#wifi-connect").hidden = false;
-  $("#wifi-connect").dataset.ssid = n.ssid;
-  $("#wifi-pass").focus();
-}
-
-$("#wifi-cancel-btn").addEventListener("click", () => { $("#wifi-connect").hidden = true; });
-
-$("#wifi-connect-btn").addEventListener("click", async () => {
-  const ssid = $("#wifi-connect").dataset.ssid;
-  const password = $("#wifi-pass").value;
-  $("#wifi-connect-btn").textContent = "Connessione…";
-  const { ok, data } = await api("/api/wifi/connect", {
-    method: "POST", body: JSON.stringify({ ssid, password }),
-  });
-  $("#wifi-connect-btn").textContent = "Connetti";
-  toast(data.message || (ok ? "Connesso" : "Errore"), ok ? "ok" : "err");
-  if (ok) { $("#wifi-connect").hidden = true; refreshStatus(); }
-});
-
-// ── Cameras ───────────────────────────────────────────────────────────────────
-let _activezoom = null;
+// ── Cameras ───────────────────────────────────────────────────────────────
+let _cameras = [];
+let _editingCamId = null;
 
 async function loadCameras() {
-  const { data } = await api("/api/cameras");
-  const list = $("#cam-list");
-  const zoomGrid = $("#zoom-buttons");
-  list.innerHTML = "";
-  zoomGrid.innerHTML = "";
+  const { data } = await api('/api/cameras');
+  _cameras = data.cameras || [];
+  renderCameras();
+}
 
-  if (!data.cameras || data.cameras.length === 0) {
-    list.innerHTML = '<li class="empty">Nessuna telecamera configurata</li>';
+function renderCameras() {
+  const list = $('#cam-list');
+  if (!_cameras.length) {
+    list.innerHTML = '<p class="text-muted" style="padding:12px 0">Nessuna telecamera configurata.</p>';
     return;
   }
-  data.cameras.forEach((c) => {
-    // Camera list
-    const li = document.createElement("li");
-    li.innerHTML = `<div class="meta"><span>${escapeHtml(c.name)}</span>
-      <span class="url">${escapeHtml(c.url)}</span></div>
-      <div class="cam-actions">
-        <button class="icon-btn edit">✎</button>
-        <button class="icon-btn del">🗑</button>
-      </div>`;
-    li.querySelector(".edit").addEventListener("click", () => editCamera(c));
-    li.querySelector(".del").addEventListener("click", () => deleteCamera(c));
-    list.appendChild(li);
-
-    // Zoom button
-    const btn = document.createElement("button");
-    btn.className = "zoom-btn";
-    btn.textContent = c.name;
-    btn.dataset.id = c.id;
-    btn.addEventListener("click", async () => {
-      const isActive = _activezoom === c.id;
-      document.querySelectorAll(".zoom-btn").forEach(b => b.classList.remove("active"));
-      if (isActive) {
-        _activezoom = null;
-        await api("/api/viewer/zoom", { method: "POST", body: JSON.stringify({ camera_id: null }) });
-      } else {
-        _activezoom = c.id;
-        btn.classList.add("active");
-        await api("/api/viewer/zoom", { method: "POST", body: JSON.stringify({ camera_id: c.id }) });
-      }
-    });
-    zoomGrid.appendChild(btn);
-  });
+  const isAdmin = _currentUser?.role === 'admin';
+  list.innerHTML = _cameras.map(c => `
+    <div class="cam-card" data-id="${c.id}">
+      <div class="cam-card-info">
+        <div class="cam-card-name">${esc(c.name)}</div>
+        <div class="cam-card-url">${esc(c.url)}</div>
+      </div>
+      <div class="cam-card-actions">
+        <button class="btn btn-sm" onclick="zoomCam('${c.id}')" title="Mostra sul TV">🔍</button>
+        ${isAdmin ? `
+          <button class="btn-icon" onclick="editCam('${c.id}')" title="Modifica">
+            <svg viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon danger" onclick="deleteCam('${c.id}')" title="Elimina">
+            <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+          </button>` : ''}
+      </div>
+    </div>`).join('');
 }
 
-$("#cam-add").addEventListener("click", () => openCamForm());
-$("#zoom-grid-btn").addEventListener("click", async () => {
-  _activezoom = null;
-  document.querySelectorAll(".zoom-btn").forEach(b => b.classList.remove("active"));
-  await api("/api/viewer/zoom", { method: "POST", body: JSON.stringify({ camera_id: null }) });
-  toast("Griglia ripristinata", "ok");
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+window.editCam = id => {
+  _editingCamId = id;
+  const c = _cameras.find(x => x.id === id);
+  if (!c) return;
+  $('#cam-form-title').textContent = 'Modifica telecamera';
+  $('#cam-name').value = c.name;
+  $('#cam-url').value = c.url;
+  $('#cam-pass').value = c.passphrase || '';
+  $('#cam-pass-row').classList.toggle('hidden', !c.url.toLowerCase().startsWith('srt://'));
+  $('#cam-form').classList.remove('hidden');
+  $('#cam-name').focus();
+};
+
+window.deleteCam = async id => {
+  const c = _cameras.find(x => x.id === id);
+  if (!c || !confirm(`Eliminare "${c.name}"?`)) return;
+  const { ok, data } = await api(`/api/cameras/${id}`, { method: 'DELETE' });
+  if (ok) { toast('Telecamera eliminata', 'ok'); loadCameras(); loadViews(); }
+  else toast(data.message || 'Errore', 'err');
+};
+
+window.zoomCam = async id => {
+  await api('/api/viewer/zoom', { method: 'POST', body: JSON.stringify({ camera_id: id }) });
+  toast('Vista inviata alla TV', 'ok');
+};
+
+$('#add-cam-btn')?.addEventListener('click', () => {
+  _editingCamId = null;
+  $('#cam-form-title').textContent = 'Nuova telecamera';
+  $('#cam-name').value = ''; $('#cam-url').value = ''; $('#cam-pass').value = '';
+  $('#cam-pass-row').classList.add('hidden');
+  $('#cam-form').classList.remove('hidden');
+  $('#cam-name').focus();
 });
-$("#cam-cancel").addEventListener("click", () => { $("#cam-form").hidden = true; });
 
-function togglePassphraseField(url) {
-  const isSrt = (url || "").startsWith("srt://");
-  $("#cam-passphrase-row").hidden = !isSrt;
-}
+$('#cam-url')?.addEventListener('input', () => {
+  $('#cam-pass-row').classList.toggle('hidden', !$('#cam-url').value.toLowerCase().startsWith('srt://'));
+});
 
-function openCamForm(cam) {
-  $("#cam-id").value = cam ? cam.id : "";
-  $("#cam-name").value = cam ? cam.name : "";
-  $("#cam-url").value = cam ? cam.url : "rtsp://";
-  $("#cam-passphrase").value = cam ? (cam.passphrase || "") : "";
-  togglePassphraseField(cam ? cam.url : "");
-  $("#cam-form").hidden = false;
-  $("#cam-name").focus();
-}
-
-$("#cam-url").addEventListener("input", e => togglePassphraseField(e.target.value));
-
-function editCamera(c) { openCamForm(c); }
-
-async function deleteCamera(c) {
-  if (!confirm(`Eliminare "${c.name}"?`)) return;
-  const { ok } = await api(`/api/cameras/${c.id}`, { method: "DELETE" });
-  if (ok) { toast("Telecamera eliminata", "ok"); loadCameras(); }
-}
-
-$("#cam-save").addEventListener("click", async () => {
-  const url = $("#cam-url").value;
-  const payload = {
-    id: $("#cam-id").value || undefined,
-    name: $("#cam-name").value,
-    url,
+$('#cam-save')?.addEventListener('click', async () => {
+  const body = {
+    id: _editingCamId || undefined,
+    name: $('#cam-name').value.trim(),
+    url: $('#cam-url').value.trim(),
+    passphrase: $('#cam-pass').value.trim() || undefined,
   };
-  const passphrase = $("#cam-passphrase").value.trim();
-  if (url.startsWith("srt://") && passphrase) payload.passphrase = passphrase;
-  const { ok, data } = await api("/api/cameras", {
-    method: "POST", body: JSON.stringify(payload),
-  });
+  if (!body.name || !body.url) { toast('Nome e URL obbligatori', 'err'); return; }
+  const { ok, data } = await api('/api/cameras', { method: 'POST', body: JSON.stringify(body) });
   if (ok) {
-    toast("Telecamera salvata", "ok");
-    $("#cam-form").hidden = true;
-    loadCameras();
-  } else {
-    toast(data.message || "Errore", "err");
-  }
+    toast(_editingCamId ? 'Telecamera aggiornata' : 'Telecamera aggiunta', 'ok');
+    $('#cam-form').classList.add('hidden');
+    loadCameras(); loadViews();
+  } else toast(data.message || 'Errore', 'err');
 });
 
-// ── Placeholder telecamera offline ───────────────────────────────────────────
+$('#cam-cancel')?.addEventListener('click', () => $('#cam-form').classList.add('hidden'));
+
+// ── Views / Screens ───────────────────────────────────────────────────────
+let _screens = [], _activeScreenId = '', _editingScreenId = null;
+
+async function loadViews() {
+  const { data } = await api('/api/screens');
+  _screens = data.screens || [];
+  _activeScreenId = data.active_screen_id || '';
+  renderViews();
+}
+
+function layoutPreviewSvg(layout, size = 36) {
+  const map = { 'auto':[2,2],'1x1':[1,1],'1x2':[1,2],'2x1':[2,1],
+    '2x2':[2,2],'3x2':[3,2],'2x3':[2,3],'3x3':[3,3],'4x4':[4,4] };
+  const [rows, cols] = map[layout] || [2,2];
+  const gap = 2, cw = (size - gap*(cols-1))/cols, ch = (size - gap*(rows-1))/rows;
+  let rects = '';
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++) {
+      const x = (c*(cw+gap)).toFixed(1), y = (r*(ch+gap)).toFixed(1);
+      rects += `<rect x="${x}" y="${y}" width="${cw.toFixed(1)}" height="${ch.toFixed(1)}" rx="1"
+        fill="var(--accent-dim)" stroke="var(--accent)" stroke-width="0.5"/>`;
+    }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${rects}</svg>`;
+}
+
+function renderViews() {
+  const list = $('#views-list');
+  if (!_screens.length) {
+    list.innerHTML = '<p class="text-muted" style="padding:12px 0">Nessuna vista configurata.</p>';
+    return;
+  }
+  const isAdmin = _currentUser?.role === 'admin';
+  list.innerHTML = _screens.map(s => {
+    const isActive = s.id === _activeScreenId;
+    const camCount = (s.cameras || []).length;
+    return `
+    <div class="view-card ${isActive ? 'active-view' : ''}" data-id="${s.id}">
+      <div class="view-card-top">
+        ${layoutPreviewSvg(s.layout)}
+        <div class="view-info">
+          <div class="view-name">${esc(s.name)}</div>
+          <div class="view-meta">${s.layout} · ${camCount} cam</div>
+          ${isActive ? '<span class="active-badge">▶ Attiva</span>' : ''}
+        </div>
+      </div>
+      <div class="view-actions">
+        <button class="btn btn-primary btn-sm" onclick="activateView('${s.id}')">▶ Mostra sul TV</button>
+        ${isAdmin ? `
+        <button class="btn-icon" onclick="editView('${s.id}')" title="Modifica">
+          <svg viewBox="0 0 24 24"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="btn-icon danger" onclick="deleteView('${s.id}')" title="Elimina">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+window.activateView = async id => {
+  const { ok, data } = await api(`/api/screens/${id}/activate`, { method: 'POST' });
+  if (ok) { _activeScreenId = id; renderViews(); toast('Vista inviata alla TV', 'ok'); }
+  else toast(data.message || 'Errore', 'err');
+};
+
+window.editView = id => {
+  _editingScreenId = id;
+  const s = _screens.find(x => x.id === id);
+  if (!s) return;
+  $('#view-form-title').textContent = 'Modifica vista';
+  $('#view-name').value = s.name;
+  $('#view-layout').value = s.layout;
+  renderCamPicker(s.cameras || []);
+  $('#view-form').classList.remove('hidden');
+  $('#view-name').focus();
+};
+
+window.deleteView = async id => {
+  const s = _screens.find(x => x.id === id);
+  if (!s || !confirm(`Eliminare la vista "${s.name}"?`)) return;
+  const { ok, data } = await api(`/api/screens/${id}`, { method: 'DELETE' });
+  if (ok) { toast('Vista eliminata', 'ok'); loadViews(); }
+  else toast(data.message || 'Errore', 'err');
+};
+
+$('#add-view-btn')?.addEventListener('click', () => {
+  _editingScreenId = null;
+  $('#view-form-title').textContent = 'Nuova vista';
+  $('#view-name').value = '';
+  $('#view-layout').value = 'auto';
+  renderCamPicker([]);
+  $('#view-form').classList.remove('hidden');
+  $('#view-name').focus();
+});
+
+function renderCamPicker(selected) {
+  const box = $('#view-cam-picker');
+  if (!_cameras.length) { box.innerHTML = '<p class="text-muted">Aggiungi prima le telecamere.</p>'; return; }
+  box.innerHTML = _cameras.map(c => {
+    const checked = selected.includes(c.id);
+    return `
+    <label class="cam-pick-item ${checked ? 'selected' : ''}" onclick="toggleCamPick(this,'${c.id}')">
+      <input type="checkbox" ${checked ? 'checked' : ''} data-cam-id="${c.id}" onclick="event.stopPropagation()"/>
+      <span>${esc(c.name)}</span>
+    </label>`;
+  }).join('');
+}
+
+window.toggleCamPick = (el, id) => {
+  const cb = el.querySelector('input');
+  cb.checked = !cb.checked;
+  el.classList.toggle('selected', cb.checked);
+};
+
+$('#view-save')?.addEventListener('click', async () => {
+  const name = $('#view-name').value.trim();
+  if (!name) { toast('Il nome è obbligatorio', 'err'); return; }
+  const cameras = $$('#view-cam-picker input:checked').map(cb => cb.dataset.camId);
+  const body = { id: _editingScreenId || undefined, name, layout: $('#view-layout').value, cameras };
+  const url = _editingScreenId ? `/api/screens/${_editingScreenId}` : '/api/screens';
+  const method = _editingScreenId ? 'PUT' : 'POST';
+  const { ok, data } = await api(url, { method, body: JSON.stringify(body) });
+  if (ok) {
+    toast(_editingScreenId ? 'Vista aggiornata' : 'Vista creata', 'ok');
+    $('#view-form').classList.add('hidden');
+    loadViews();
+  } else toast(data.message || 'Errore', 'err');
+});
+
+$('#view-cancel')?.addEventListener('click', () => $('#view-form').classList.add('hidden'));
+
+// ── Settings ──────────────────────────────────────────────────────────────
+async function loadSettings() {
+  const { data } = await api('/api/settings');
+  if (data.layout) $('#set-layout').value = data.layout;
+  if (data.settings?.render_fps) $('#set-fps').value = String(data.settings.render_fps);
+}
+
+$('#set-save')?.addEventListener('click', async () => {
+  const btn = $('#set-save');
+  btn.disabled = true; btn.textContent = 'Salvataggio…';
+  const { ok } = await api('/api/settings', {
+    method: 'POST',
+    body: JSON.stringify({ layout: $('#set-layout').value, render_fps: parseInt($('#set-fps').value) })
+  });
+  toast(ok ? 'Impostazioni salvate' : 'Errore', ok ? 'ok' : 'err');
+  btn.disabled = false; btn.textContent = 'Salva impostazioni';
+});
+
+// ── Restart viewer ────────────────────────────────────────────────────────
+$('#restart-viewer-btn')?.addEventListener('click', async () => {
+  const btn = $('#restart-viewer-btn');
+  btn.disabled = true; btn.textContent = 'Riavvio…';
+  const { ok, data } = await api('/api/restart-viewer', { method: 'POST' });
+  toast(data.message || (ok ? 'Viewer riavviato' : 'Errore'), ok ? 'ok' : 'err');
+  btn.disabled = false; btn.textContent = '🔄 Riavvia viewer';
+});
+
+// ── Placeholder ───────────────────────────────────────────────────────────
 async function loadPlaceholder() {
-  const { data } = await api("/api/placeholder");
-  if (data && data.custom && data.url) {
-    const img = $("#placeholder-preview");
-    img.src = data.url + "?t=" + Date.now();
-    $("#placeholder-preview-box").hidden = false;
+  const { data } = await api('/api/placeholder');
+  if (data?.custom && data.url) {
+    $('#placeholder-preview').src = data.url + '?t=' + Date.now();
+    $('#placeholder-preview-box').hidden = false;
   }
 }
 
-const placeholderFile = $("#placeholder-file");
-const placeholderApply = $("#placeholder-apply");
-const placeholderLabel = $("#placeholder-label");
-
-placeholderFile.addEventListener("change", () => {
-  const f = placeholderFile.files[0];
-  if (!f) return;
-  placeholderLabel.textContent = "🖼 " + f.name;
-  placeholderApply.disabled = false;
+const phFile = $('#placeholder-file');
+phFile?.addEventListener('change', () => {
+  const f = phFile.files[0]; if (!f) return;
+  $('#placeholder-label').textContent = '🖼 ' + f.name;
+  $('#placeholder-apply').disabled = false;
   const reader = new FileReader();
-  reader.onload = e => {
-    const img = $("#placeholder-preview");
-    img.src = e.target.result;
-    $("#placeholder-preview-box").hidden = false;
-  };
+  reader.onload = e => { $('#placeholder-preview').src = e.target.result; $('#placeholder-preview-box').hidden = false; };
   reader.readAsDataURL(f);
 });
 
-placeholderApply.addEventListener("click", async () => {
-  const f = placeholderFile.files[0];
-  if (!f) return;
-  placeholderApply.textContent = "Invio…";
-  placeholderApply.disabled = true;
-  const form = new FormData();
-  form.append("file", f);
-  const res = await fetch("/api/placeholder", { method: "POST", body: form });
+$('#placeholder-apply')?.addEventListener('click', async () => {
+  const f = phFile?.files[0]; if (!f) return;
+  const btn = $('#placeholder-apply');
+  btn.disabled = true; btn.textContent = 'Invio…';
+  const form = new FormData(); form.append('file', f);
+  const res = await fetch('/api/placeholder', { method: 'POST', body: form });
   const data = await res.json();
-  toast(data.message || (data.ok ? "Logo aggiornato" : "Errore"), data.ok ? "ok" : "err");
-  placeholderApply.textContent = "Applica logo";
-  placeholderApply.disabled = false;
+  toast(data.message || (data.ok ? 'Logo aggiornato' : 'Errore'), data.ok ? 'ok' : 'err');
+  btn.textContent = 'Applica logo'; btn.disabled = false;
   if (data.ok) loadPlaceholder();
 });
 
-$("#placeholder-reset").addEventListener("click", async () => {
-  const { ok, data } = await api("/api/placeholder", { method: "DELETE" });
-  toast(data.message || (ok ? "Logo rimosso" : "Errore"), ok ? "ok" : "err");
+$('#placeholder-reset')?.addEventListener('click', async () => {
+  const { ok, data } = await api('/api/placeholder', { method: 'DELETE' });
+  toast(data.message || (ok ? 'Logo rimosso' : 'Errore'), ok ? 'ok' : 'err');
   if (ok) {
-    $("#placeholder-preview-box").hidden = true;
-    placeholderLabel.textContent = "📂 Scegli un'immagine (JPG, PNG, WEBP)";
-    placeholderFile.value = "";
-    placeholderApply.disabled = true;
+    $('#placeholder-preview-box').hidden = true;
+    $('#placeholder-label').textContent = '📂 Scegli un\'immagine (JPG, PNG, WEBP)';
+    if (phFile) phFile.value = '';
+    $('#placeholder-apply').disabled = true;
   }
 });
 
-// ── Wallpaper ─────────────────────────────────────────────────────────────────
+// ── Wallpaper ─────────────────────────────────────────────────────────────
 async function loadWallpaper() {
-  const { data } = await api("/api/wallpaper");
-  if (data.custom && data.url) {
-    const box = $("#wallpaper-preview-box");
-    const img = $("#wallpaper-preview");
-    img.src = data.url + "?t=" + Date.now();
-    box.hidden = false;
+  const { data } = await api('/api/wallpaper');
+  if (data?.custom && data.url) {
+    $('#wallpaper-preview').src = data.url + '?t=' + Date.now();
+    $('#wallpaper-preview-box').hidden = false;
   }
 }
 
-const wallpaperFile = $("#wallpaper-file");
-const wallpaperApply = $("#wallpaper-apply");
-const wallpaperLabel = $("#wallpaper-label");
-
-wallpaperFile.addEventListener("change", () => {
-  const f = wallpaperFile.files[0];
-  if (!f) return;
-  wallpaperLabel.textContent = "📷 " + f.name;
-  wallpaperApply.disabled = false;
-  // Anteprima locale
+const wpFile = $('#wallpaper-file');
+wpFile?.addEventListener('change', () => {
+  const f = wpFile.files[0]; if (!f) return;
+  $('#wallpaper-label').textContent = '📷 ' + f.name;
+  $('#wallpaper-apply').disabled = false;
   const reader = new FileReader();
-  reader.onload = e => {
-    const img = $("#wallpaper-preview");
-    img.src = e.target.result;
-    $("#wallpaper-preview-box").hidden = false;
-  };
+  reader.onload = e => { $('#wallpaper-preview').src = e.target.result; $('#wallpaper-preview-box').hidden = false; };
   reader.readAsDataURL(f);
 });
 
-wallpaperApply.addEventListener("click", async () => {
-  const f = wallpaperFile.files[0];
-  if (!f) return;
-  wallpaperApply.textContent = "Invio…";
-  wallpaperApply.disabled = true;
-  const form = new FormData();
-  form.append("file", f);
-  const res = await fetch("/api/wallpaper", { method: "POST", body: form });
+$('#wallpaper-apply')?.addEventListener('click', async () => {
+  const f = wpFile?.files[0]; if (!f) return;
+  const btn = $('#wallpaper-apply');
+  btn.disabled = true; btn.textContent = 'Invio…';
+  const form = new FormData(); form.append('file', f);
+  const res = await fetch('/api/wallpaper', { method: 'POST', body: form });
   const data = await res.json();
-  toast(data.message || (data.ok ? "Sfondo aggiornato" : "Errore"), data.ok ? "ok" : "err");
-  wallpaperApply.textContent = "Applica sfondo";
-  wallpaperApply.disabled = false;
+  toast(data.message || (data.ok ? 'Sfondo aggiornato' : 'Errore'), data.ok ? 'ok' : 'err');
+  btn.textContent = 'Applica sfondo'; btn.disabled = false;
   if (data.ok) loadWallpaper();
 });
 
-$("#wallpaper-reset").addEventListener("click", async () => {
-  const { ok, data } = await api("/api/wallpaper", { method: "DELETE" });
-  toast(data.message || (ok ? "Sfondo ripristinato" : "Errore"), ok ? "ok" : "err");
+$('#wallpaper-reset')?.addEventListener('click', async () => {
+  const { ok, data } = await api('/api/wallpaper', { method: 'DELETE' });
+  toast(data.message || (ok ? 'Sfondo ripristinato' : 'Errore'), ok ? 'ok' : 'err');
   if (ok) {
-    $("#wallpaper-preview-box").hidden = true;
-    wallpaperLabel.textContent = "📂 Scegli un'immagine (JPG, PNG, WEBP)";
-    wallpaperFile.value = "";
-    wallpaperApply.disabled = true;
+    $('#wallpaper-preview-box').hidden = true;
+    $('#wallpaper-label').textContent = '📂 Scegli un\'immagine (JPG, PNG, WEBP)';
+    if (wpFile) wpFile.value = '';
+    $('#wallpaper-apply').disabled = true;
   }
 });
 
-// ── Settings ──────────────────────────────────────────────────────────────────
-async function loadSettings() {
-  const { data } = await api("/api/settings");
-  if (data.layout) $("#set-layout").value = data.layout;
-  if (data.settings && data.settings.render_fps) $("#set-fps").value = String(data.settings.render_fps);
-}
-
-$("#set-save").addEventListener("click", async () => {
-  const btn = $("#set-save");
-  btn.textContent = "Salvataggio…";
-  btn.disabled = true;
-
-  const payload = {
-    layout: $("#set-layout").value,
-    render_fps: parseInt($("#set-fps").value, 10),
-  };
-  const { ok } = await api("/api/settings", { method: "POST", body: JSON.stringify(payload) });
-  if (!ok) {
-    toast("Errore nel salvataggio", "err");
-    btn.textContent = "Applica — salva e aggiorna griglia";
-    btn.disabled = false;
-    return;
-  }
-
-  btn.textContent = "Riavvio viewer…";
-  await api("/api/restart-viewer", { method: "POST" });
-  toast("Griglia aggiornata — viewer riavviato", "ok");
-
-  btn.textContent = "Applica — salva e aggiorna griglia";
-  btn.disabled = false;
-});
-
-// ── VPN ───────────────────────────────────────────────────────────────────────
-let vpnProto = "wireguard";
-$("#vpn-proto-wg").addEventListener("click", () => setVpnProto("wireguard"));
-$("#vpn-proto-ovpn").addEventListener("click", () => setVpnProto("openvpn"));
-
-function setVpnProto(p) {
-  vpnProto = p;
-  const wg = p === "wireguard";
-  $("#vpn-proto-wg").classList.toggle("is-active", wg);
-  $("#vpn-proto-ovpn").classList.toggle("is-active", !wg);
-  $("#wg-section").hidden = !wg;
-  $("#ovpn-section").hidden = wg;
-}
-
-$("#vpn-mode-file").addEventListener("click", () => setVpnMode("file"));
-$("#vpn-mode-manual").addEventListener("click", () => setVpnMode("manual"));
-
-function setVpnMode(mode) {
-  const file = mode === "file";
-  $("#vpn-mode-file").classList.toggle("is-active", file);
-  $("#vpn-mode-manual").classList.toggle("is-active", !file);
-  $("#vpn-file-box").hidden = !file;
-  $("#vpn-manual-box").hidden = file;
-}
-
-function fmtBytes(n) {
-  if (!n) return "0 B";
-  const u = ["B", "KB", "MB", "GB"];
-  let i = 0;
-  while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
-  return n.toFixed(1) + " " + u[i];
-}
-
-function vpnRow(label, value) {
-  if (!value) return "";
-  return `<tr><td class="vpn-info-label">${escapeHtml(label)}</td><td class="vpn-info-value">${escapeHtml(value)}</td></tr>`;
-}
-
+// ── VPN ───────────────────────────────────────────────────────────────────
 async function loadVpnStatus() {
-  const { data } = await api("/api/vpn");
-  const st = $("#vpn-status");
-  const txt = $("#vpn-status-text");
-  const detail = $("#vpn-detail");
-  const rows = $("#vpn-info-rows");
-  const actions = $("#vpn-actions");
-  const form = $("#vpn-form");
-
+  const { data } = await api('/api/vpn');
+  const ind = $('#vpn-status-indicator'), txt = $('#vpn-status-text'), sub = $('#vpn-status-sub');
+  const disBtn = $('#vpn-disable-btn'), vpnForm = $('#vpn-form');
   if (data.active) {
-    const proto = data.protocol === "openvpn" ? "OpenVPN" : "WireGuard";
-    const transport = (data.proto || "").toUpperCase();
-    const badge = transport ? ` · ${transport}` : "";
-    st.className = "status status--on";
-    txt.textContent = `${proto} attiva${badge}`;
-    detail.hidden = false;
-
-    if (data.protocol === "openvpn") {
-      rows.innerHTML =
-        vpnRow("Server", data.server) +
-        vpnRow("IP tunnel", data.tun_ip) +
-        vpnRow("Route camere", data.routes);
-    } else {
-      const hs = data.last_handshake
-        ? new Date(data.last_handshake * 1000).toLocaleTimeString()
-        : "in attesa…";
-      rows.innerHTML =
-        vpnRow("Protocollo", "WireGuard") +
-        vpnRow("Endpoint", data.endpoint) +
-        vpnRow("Subnet", data.allowed_ips) +
-        vpnRow("Ultimo handshake", hs) +
-        vpnRow("Traffico", `↓ ${fmtBytes(data.rx)} · ↑ ${fmtBytes(data.tx)}`);
-    }
-    actions.hidden = false;
-    form.hidden = true;
-  } else if (data.configured) {
-    const proto = data.protocol === "openvpn" ? "OpenVPN" : "WireGuard";
-    st.className = "status status--warn";
-    txt.textContent = `${proto} configurata ma non attiva`;
-    rows.innerHTML = vpnRow("Protocollo", data.protocol === "openvpn" ? `OpenVPN ${data.proto || ""}` : "WireGuard") +
-                     vpnRow("Server", data.server);
-    detail.hidden = false;
-    actions.hidden = false;
-    form.hidden = true;
+    ind.className = 'status-indicator active'; ind.textContent = '🔒';
+    txt.textContent = `${data.protocol === 'openvpn' ? 'OpenVPN' : 'WireGuard'} attivo`;
+    sub.textContent = data.ip || '';
+    disBtn.hidden = false;
+    if (vpnForm) vpnForm.hidden = true;
   } else {
-    st.className = "status status--off";
-    txt.textContent = "VPN non configurata";
-    detail.hidden = true;
-    actions.hidden = true;
-    form.hidden = false;
+    ind.className = 'status-indicator'; ind.textContent = '🔓';
+    txt.textContent = 'VPN non attiva';
+    sub.textContent = data.configured ? 'Configurata, non connessa' : '';
+    disBtn.hidden = true;
+    if (vpnForm && _currentUser?.role === 'admin') vpnForm.hidden = false;
   }
+  // Pre-fill subnets
+  const subnets = data.camera_subnets || [];
+  const ta = $('#vpn-subnets');
+  if (ta && subnets.length && !ta.value) ta.value = subnets.join('\n');
 }
 
-$("#vpn-reconfigure").addEventListener("click", () => {
-  $("#vpn-form").hidden = false;
-  $("#vpn-form").scrollIntoView({ behavior: "smooth" });
-});
-
-function readFileText(input) {
-  return new Promise((resolve) => {
-    const f = input.files && input.files[0];
-    if (!f) return resolve(null);
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.readAsText(f);
-  });
-}
-
-$("#vpn-apply").addEventListener("click", async () => {
-  const subnets = $("#vpn-subnets").value;
-  if (!subnets.trim()) { toast("Indica le subnet delle camere remote", "err"); return; }
-  const payload = {
-    protocol: vpnProto,
-    camera_subnets: subnets,
-    enable_on_boot: $("#vpn-boot").checked,
-  };
-
-  if (vpnProto === "openvpn") {
-    const text = await readFileText($("#ovpn-file"));
-    if (!text) { toast("Seleziona un file .ovpn", "err"); return; }
-    payload.conf_text = text;
-    payload.username = $("#ovpn-user").value;
-    payload.password = $("#ovpn-pass").value;
-  } else {
-    const fileMode = $("#vpn-mode-file").classList.contains("is-active");
-    if (fileMode) {
-      const text = await readFileText($("#vpn-file"));
-      if (!text) { toast("Seleziona un file .conf", "err"); return; }
-      payload.mode = "file";
-      payload.conf_text = text;
-    } else {
-      payload.mode = "manual";
-      payload.private_key = $("#vpn-private-key").value;
-      payload.address = $("#vpn-address").value;
-      payload.peer_public_key = $("#vpn-public-key").value;
-      payload.preshared_key = $("#vpn-psk").value;
-      payload.endpoint = $("#vpn-endpoint").value;
-    }
-  }
-
-  $("#vpn-apply").textContent = "Attivazione…";
-  const { ok, data } = await api("/api/vpn", { method: "POST", body: JSON.stringify(payload) });
-  $("#vpn-apply").textContent = "Attiva VPN";
-  toast(data.message || (ok ? "VPN attivata" : "Errore"), ok ? "ok" : "err");
+$('#vpn-disable-btn')?.addEventListener('click', async () => {
+  const { ok, data } = await api('/api/vpn/disable', { method: 'POST' });
+  toast(data.message || (ok ? 'VPN disattivata' : 'Errore'), ok ? 'ok' : 'err');
   if (ok) loadVpnStatus();
 });
 
-$("#vpn-disable").addEventListener("click", async () => {
-  const { ok, data } = await api("/api/vpn/disable", { method: "POST" });
-  toast(data.message || (ok ? "VPN disattivata" : "Errore"), ok ? "ok" : "err");
-  loadVpnStatus();
+// Proto seg
+$$('#vpn-proto-seg .seg-btn').forEach(b => b.addEventListener('click', () => {
+  $$('#vpn-proto-seg .seg-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  const val = b.dataset.val;
+  $('#ovpn-section').hidden = val !== 'openvpn';
+  $('#wg-section').hidden = val !== 'wireguard';
+}));
+
+// WG mode seg
+$$('#wg-mode-seg .seg-btn').forEach(b => b.addEventListener('click', () => {
+  $$('#wg-mode-seg .seg-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  $('#wg-file-box').hidden = b.dataset.val !== 'file';
+  $('#wg-manual-box').hidden = b.dataset.val !== 'manual';
+}));
+
+// OVPN file
+$('#ovpn-drop')?.addEventListener('click', () => $('#ovpn-file').click());
+$('#ovpn-file')?.addEventListener('change', () => {
+  const f = $('#ovpn-file').files[0];
+  if (f) { $('#ovpn-label').textContent = '📄 ' + f.name; }
 });
 
-$("#vpn-remove").addEventListener("click", async () => {
-  if (!confirm("Rimuovere la configurazione VPN?")) return;
-  const { ok, data } = await api("/api/vpn", { method: "DELETE" });
-  toast(data.message || (ok ? "VPN rimossa" : "Errore"), ok ? "ok" : "err");
-  loadVpnStatus();
+// WG file
+$('#wg-drop')?.addEventListener('click', () => $('#wg-file').click());
+$('#wg-file')?.addEventListener('change', () => {
+  const f = $('#wg-file').files[0];
+  if (f) { $('#wg-label').textContent = '📄 ' + f.name; }
 });
 
-// ── Apply / start viewer ──────────────────────────────────────────────────────
-$("#apply-btn").addEventListener("click", async () => {
-  if (!confirm("Avviare il viewer? Il dispositivo si riavvierà e mostrerà le telecamere sul monitor.")) return;
-  const { ok, data } = await api("/api/apply", { method: "POST" });
-  if (ok) {
-    toast(data.message || "Riavvio in corso…", "ok");
-    document.body.innerHTML =
-      '<div style="display:flex;align-items:center;justify-content:center;height:100vh;text-align:center;padding:24px">' +
-      '<div><h2>Riavvio in corso…</h2><p style="color:#9a9a9a">Il dispositivo si sta avviando con le telecamere configurate.<br>' +
-      'Puoi chiudere questa pagina.</p></div></div>';
+$('#vpn-apply-btn')?.addEventListener('click', async () => {
+  const btn = $('#vpn-apply-btn'); btn.disabled = true; btn.textContent = 'Applicazione…';
+  const proto = ($('#vpn-proto-seg .seg-btn.active') || {}).dataset?.val || 'openvpn';
+  const subnets = $('#vpn-subnets').value.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean);
+  const enable_on_boot = $('#vpn-autoconnect').checked;
+
+  let body = { protocol: proto, camera_subnets: subnets, enable_on_boot };
+
+  if (proto === 'openvpn') {
+    const f = $('#ovpn-file').files[0];
+    if (f) body.conf_text = await f.text();
+    body.username = $('#ovpn-user').value;
+    body.password = $('#ovpn-pass').value;
   } else {
-    toast(data.message || "Errore", "err");
+    const mode = ($('#wg-mode-seg .seg-btn.active') || {}).dataset?.val || 'file';
+    if (mode === 'file') {
+      const f = $('#wg-file').files[0];
+      if (f) { body.mode = 'file'; body.conf_text = await f.text(); }
+    } else {
+      body.mode = 'manual';
+      body.private_key = $('#wg-private-key').value;
+      body.address = $('#wg-address').value;
+      body.peer_public_key = $('#wg-peer-pub').value;
+      body.preshared_key = $('#wg-psk').value || undefined;
+      body.endpoint = $('#wg-endpoint').value;
+    }
   }
+
+  const { ok, data } = await api('/api/vpn', { method: 'POST', body: JSON.stringify(body) });
+  toast(data.message || (ok ? 'Tunnel configurato' : 'Errore'), ok ? 'ok' : 'err');
+  btn.disabled = false; btn.textContent = 'Applica tunnel';
+  if (ok) loadVpnStatus();
 });
 
-// ── Utils ──────────────────────────────────────────────────────────────────────
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  }[c]));
+$('#vpn-remove-btn')?.addEventListener('click', async () => {
+  if (!confirm('Rimuovere la configurazione VPN?')) return;
+  const { ok, data } = await api('/api/vpn', { method: 'DELETE' });
+  toast(data.message || (ok ? 'VPN rimossa' : 'Errore'), ok ? 'ok' : 'err');
+  if (ok) { $('#vpn-subnets').value = ''; loadVpnStatus(); }
+});
+
+// ── Users ─────────────────────────────────────────────────────────────────
+let _users = [];
+
+async function loadUsers() {
+  if (_currentUser?.role !== 'admin') return;
+  const { data } = await api('/api/users');
+  _users = data.users || [];
+  renderUsers();
 }
 
-// ── Init ─────────────────────────────────────────────────────────────────────
-refreshStatus();
-$("#restart-viewer-btn").addEventListener("click", async () => {
-  const btn = $("#restart-viewer-btn");
-  btn.textContent = "Riavvio…";
-  btn.disabled = true;
-  const { ok, data } = await api("/api/restart-viewer", { method: "POST" });
-  toast(data?.message || (ok ? "Viewer riavviato" : "Errore"), ok ? "ok" : "err");
-  btn.textContent = "🔄 Riavvia viewer";
-  btn.disabled = false;
+function renderUsers() {
+  const list = $('#users-list');
+  if (!list) return;
+  if (!_users.length) { list.innerHTML = '<p class="text-muted">Nessun utente.</p>'; return; }
+  list.innerHTML = _users.map(u => `
+    <div class="user-row">
+      <div class="user-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--accent);
+        color:#fff;font-size:.85rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        ${u.username[0].toUpperCase()}</div>
+      <div class="user-row-info">
+        <div class="user-row-name">${esc(u.username)}</div>
+        <span class="role-badge ${u.role === 'operator' ? 'operator' : ''}">
+          ${u.role === 'admin' ? 'Amministratore' : 'Operatore'}
+        </span>
+      </div>
+      <div class="cam-card-actions">
+        ${u.id !== _currentUser?.id ? `
+        <button class="btn-icon danger" onclick="deleteUser('${u.id}','${esc(u.username)}')" title="Elimina">
+          <svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
+        </button>` : '<span class="text-muted" style="font-size:.75rem;padding:0 8px">Tu</span>'}
+      </div>
+    </div>`).join('');
+}
+
+window.deleteUser = async (id, name) => {
+  if (!confirm(`Eliminare l'utente "${name}"?`)) return;
+  const { ok, data } = await api(`/api/users/${id}`, { method: 'DELETE' });
+  toast(data.message || (ok ? 'Utente eliminato' : 'Errore'), ok ? 'ok' : 'err');
+  if (ok) loadUsers();
+};
+
+$('#add-user-btn')?.addEventListener('click', () => {
+  $('#user-username').value = ''; $('#user-password').value = ''; $('#user-role').value = 'operator';
+  $('#user-form').classList.remove('hidden');
+  $('#user-username').focus();
 });
 
-loadCameras();
-loadSettings();
-loadVpnStatus();
-loadPlaceholder();
-loadWallpaper();
-setInterval(refreshStatus, 8000);
+$('#user-save')?.addEventListener('click', async () => {
+  const body = {
+    username: $('#user-username').value.trim(),
+    password: $('#user-password').value,
+    role: $('#user-role').value,
+  };
+  if (!body.username || !body.password) { toast('Username e password obbligatori', 'err'); return; }
+  const { ok, data } = await api('/api/users', { method: 'POST', body: JSON.stringify(body) });
+  if (ok) { toast('Utente creato', 'ok'); $('#user-form').classList.add('hidden'); loadUsers(); }
+  else toast(data.message || 'Errore', 'err');
+});
+
+$('#user-cancel')?.addEventListener('click', () => $('#user-form').classList.add('hidden'));
+
+// Change own password
+$('#own-password-save')?.addEventListener('click', async () => {
+  const pw = $('#own-password').value;
+  if (pw.length < 4) { toast('Password troppo corta', 'err'); return; }
+  const { ok, data } = await api(`/api/users/${_currentUser.id}/password`, {
+    method: 'PUT', body: JSON.stringify({ password: pw })
+  });
+  toast(data.message || (ok ? 'Password aggiornata' : 'Errore'), ok ? 'ok' : 'err');
+  if (ok) $('#own-password').value = '';
+});
+
+// ── Apply / Setup mode ────────────────────────────────────────────────────
+$('#apply-btn')?.addEventListener('click', async () => {
+  const { ok, data } = await api('/api/apply', { method: 'POST' });
+  toast(data.message || (ok ? 'Riavvio in corso…' : 'Errore'), ok ? 'ok' : 'err');
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────
+(async () => {
+  const ok = await initAuth();
+  if (!ok) return;
+
+  // Load site name (public)
+  await loadSiteName();
+
+  // Load all data in parallel
+  await Promise.all([
+    loadStatus(),
+    loadCameras(),
+    loadViews(),
+    loadSettings(),
+    loadVpnStatus(),
+    loadPlaceholder(),
+    loadWallpaper(),
+    loadUsers(),
+  ]);
+
+  // Poll status every 30s
+  setInterval(loadStatus, 30000);
+})();

@@ -17,6 +17,7 @@ import uuid
 from pathlib import Path
 
 VALID_LAYOUTS = ["auto", "1x1", "1x2", "2x1", "2x2", "3x2", "2x3", "3x3", "4x4"]
+VALID_ROLES   = ["admin", "operator"]
 
 # Serializes read-modify-write sequences across concurrent requests.
 _CONFIG_LOCK = threading.RLock()
@@ -65,9 +66,11 @@ def should_provision() -> bool:
 
 
 def _default_config() -> dict:
+    first_screen_id = uuid.uuid4().hex[:8]
     return {
         "cameras": [],
-        "screens": [{"name": "Default", "layout": "auto", "cameras": []}],
+        "screens": [{"id": first_screen_id, "name": "Default", "layout": "auto", "cameras": []}],
+        "active_screen_id": first_screen_id,
         "settings": {
             "kiosk_mode": True,
             "reconnect_delay_ms": 5000,
@@ -75,6 +78,8 @@ def _default_config() -> dict:
             "default_screen": 0,
         },
         "network": {"mode": "dhcp", "interface": "auto"},
+        "site_name": "Camera Viewer",
+        "users": [],   # populated by _normalize on first run
     }
 
 
@@ -85,16 +90,34 @@ def _normalize(cfg: dict) -> dict:
     if not isinstance(cfg.get("cameras"), list):
         cfg["cameras"] = []
     if not isinstance(cfg.get("screens"), list) or not cfg["screens"]:
-        cfg["screens"] = [{"name": "Default", "layout": "auto", "cameras": []}]
+        sid = uuid.uuid4().hex[:8]
+        cfg["screens"] = [{"id": sid, "name": "Default", "layout": "auto", "cameras": []}]
     for screen in cfg["screens"]:
         if not isinstance(screen, dict):
             continue
         if not isinstance(screen.get("cameras"), list):
             screen["cameras"] = []
+        # Migrate: add id to existing screens
+        if "id" not in screen:
+            screen["id"] = uuid.uuid4().hex[:8]
     if not isinstance(cfg.get("settings"), dict):
         cfg["settings"] = {}
     if not isinstance(cfg.get("network"), dict):
         cfg["network"] = {"mode": "dhcp", "interface": "auto"}
+    # Migrate: active_screen_id
+    if not cfg.get("active_screen_id") and cfg["screens"]:
+        cfg["active_screen_id"] = cfg["screens"][0]["id"]
+    # Migrate: site_name
+    cfg.setdefault("site_name", "Camera Viewer")
+    # Migrate: users — create default admin on first run
+    if not isinstance(cfg.get("users"), list) or not cfg["users"]:
+        from werkzeug.security import generate_password_hash
+        cfg["users"] = [{
+            "id": uuid.uuid4().hex[:8],
+            "username": "admin",
+            "password_hash": generate_password_hash("admin"),
+            "role": "admin",
+        }]
     return cfg
 
 
@@ -213,3 +236,135 @@ def get_layout() -> str:
     if cfg["screens"]:
         return cfg["screens"][0].get("layout", "auto")
     return "auto"
+
+
+# ── Screens (views) ──────────────────────────────────────────────────────────
+
+def list_screens() -> list[dict]:
+    return load_config().get("screens", [])
+
+
+def get_active_screen_id() -> str:
+    cfg = load_config()
+    return cfg.get("active_screen_id", "")
+
+
+def upsert_screen(screen: dict) -> dict:
+    sid = screen.get("id") or uuid.uuid4().hex[:8]
+    entry = {
+        "id": sid,
+        "name": (screen.get("name") or "").strip() or "Vista",
+        "layout": screen.get("layout", "auto") if screen.get("layout") in VALID_LAYOUTS else "auto",
+        "cameras": [c for c in screen.get("cameras", []) if isinstance(c, str)],
+    }
+
+    def _apply(cfg):
+        screens = cfg.setdefault("screens", [])
+        for i, s in enumerate(screens):
+            if s.get("id") == sid:
+                screens[i] = entry
+                return
+        screens.append(entry)
+        if not cfg.get("active_screen_id"):
+            cfg["active_screen_id"] = sid
+
+    mutate(_apply)
+    return entry
+
+
+def delete_screen(screen_id: str) -> bool:
+    def _apply(cfg):
+        before = len(cfg.get("screens", []))
+        cfg["screens"] = [s for s in cfg.get("screens", []) if s.get("id") != screen_id]
+        # Reset active if deleted
+        if cfg.get("active_screen_id") == screen_id:
+            cfg["active_screen_id"] = cfg["screens"][0]["id"] if cfg["screens"] else ""
+        return len(cfg["screens"]) < before
+
+    return mutate(_apply)
+
+
+def set_active_screen(screen_id: str) -> bool:
+    def _apply(cfg):
+        ids = [s["id"] for s in cfg.get("screens", [])]
+        if screen_id not in ids:
+            return False
+        cfg["active_screen_id"] = screen_id
+        return True
+
+    return mutate(_apply)
+
+
+# ── Site name ────────────────────────────────────────────────────────────────
+
+def get_site_name() -> str:
+    return load_config().get("site_name", "Camera Viewer")
+
+
+def set_site_name(name: str) -> None:
+    def _apply(cfg):
+        cfg["site_name"] = (name or "Camera Viewer").strip()[:64]
+    mutate(_apply)
+
+
+# ── Users ────────────────────────────────────────────────────────────────────
+
+def list_users() -> list[dict]:
+    """Returns users without password_hash."""
+    return [
+        {"id": u["id"], "username": u["username"], "role": u["role"]}
+        for u in load_config().get("users", [])
+    ]
+
+
+def get_user_by_username(username: str) -> dict | None:
+    for u in load_config().get("users", []):
+        if u.get("username") == username:
+            return u
+    return None
+
+
+def get_user_by_id(user_id: str) -> dict | None:
+    for u in load_config().get("users", []):
+        if u.get("id") == user_id:
+            return u
+    return None
+
+
+def create_user(username: str, password_hash: str, role: str) -> dict:
+    uid = uuid.uuid4().hex[:8]
+    entry = {"id": uid, "username": username.strip(), "password_hash": password_hash, "role": role}
+
+    def _apply(cfg):
+        cfg.setdefault("users", []).append(entry)
+
+    mutate(_apply)
+    return {"id": uid, "username": entry["username"], "role": role}
+
+
+def update_user_password(user_id: str, password_hash: str) -> bool:
+    def _apply(cfg):
+        for u in cfg.get("users", []):
+            if u["id"] == user_id:
+                u["password_hash"] = password_hash
+                return True
+        return False
+
+    return mutate(_apply)
+
+
+def delete_user(user_id: str) -> bool:
+    """Refuses deletion if it's the last admin."""
+    def _apply(cfg):
+        users = cfg.get("users", [])
+        target = next((u for u in users if u["id"] == user_id), None)
+        if not target:
+            return False
+        if target["role"] == "admin":
+            admins = [u for u in users if u["role"] == "admin"]
+            if len(admins) <= 1:
+                return False  # last admin — refuse
+        cfg["users"] = [u for u in users if u["id"] != user_id]
+        return True
+
+    return mutate(_apply)

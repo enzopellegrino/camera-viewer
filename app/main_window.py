@@ -238,7 +238,6 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._exit_single_cam)
         elif cmd.startswith("zoom:"):
             cam_id = cmd[5:]
-            # Find the widget with this camera id
             if self._grid:
                 for w in self._grid._widgets:
                     if w.camera_config.get("id") == cam_id:
@@ -248,6 +247,15 @@ class MainWindow(QMainWindow):
                         else:
                             QTimer.singleShot(0, lambda widget=w: self._enter_single_cam(widget))
                         break
+        elif cmd.startswith("screen:"):
+            # Switch to a named screen/view by id (from portal)
+            screen_id = cmd[7:]
+            screens = self.config.screens
+            idx = next((i for i, s in enumerate(screens) if s.get("id") == screen_id), None)
+            if idx is not None:
+                if self._single_cam_mode:
+                    QTimer.singleShot(0, self._exit_single_cam)
+                QTimer.singleShot(0, lambda i=idx: self._load_screen(i))
 
     def _on_camera_clicked(self, widget):
         if self._single_cam_mode:

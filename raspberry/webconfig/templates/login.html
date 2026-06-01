@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+<title>Camera Viewer — Accesso</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  :root{
+    --bg:#0c0e18;--surface:#151826;--card:#1c2035;--border:#252a3e;
+    --accent:#4f72f7;--accent-h:#6888f9;--text:#d8e0f5;--muted:#6b7a9e;
+    --danger:#f25757;--radius:12px;
+  }
+  body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;
+    background-image:radial-gradient(ellipse at 60% 20%,rgba(79,114,247,.08) 0%,transparent 60%)}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+    width:100%;max-width:380px;padding:40px 32px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .brand{text-align:center;margin-bottom:32px}
+  .brand-icon{width:56px;height:56px;background:var(--accent);border-radius:14px;
+    display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:26px}
+  .brand h1{font-size:1.4rem;font-weight:700;letter-spacing:-.02em}
+  .brand-sub{color:var(--muted);font-size:.85rem;margin-top:4px}
+  .field{margin-bottom:18px}
+  label{display:block;font-size:.8rem;font-weight:600;color:var(--muted);
+    text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+  input{width:100%;background:var(--surface);border:1px solid var(--border);
+    border-radius:8px;color:var(--text);font-size:.95rem;padding:11px 14px;outline:none;
+    transition:border-color .15s}
+  input:focus{border-color:var(--accent)}
+  .btn{width:100%;padding:13px;background:var(--accent);color:#fff;border:none;
+    border-radius:8px;font-size:.95rem;font-weight:600;cursor:pointer;
+    transition:background .15s;margin-top:8px}
+  .btn:hover{background:var(--accent-h)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .error{background:rgba(242,87,87,.12);border:1px solid rgba(242,87,87,.35);
+    border-radius:8px;color:#f87171;font-size:.85rem;padding:10px 14px;margin-top:14px;display:none}
+  .hint{text-align:center;color:var(--muted);font-size:.78rem;margin-top:22px;line-height:1.5}
+  .hint strong{color:var(--text)}
+  .spinner{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.3);
+    border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="brand">
+    <div class="brand-icon">🎥</div>
+    <h1 id="site-name">Camera Viewer</h1>
+    <p class="brand-sub">Portale di configurazione</p>
+  </div>
+  <form id="form">
+    <div class="field">
+      <label>Username</label>
+      <input id="username" type="text" autocomplete="username" autofocus placeholder="admin"/>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="••••••"/>
+    </div>
+    <button class="btn" type="submit" id="submit-btn">Accedi</button>
+    <div class="error" id="error-msg"></div>
+  </form>
+  <p class="hint">Prima installazione: <strong>admin</strong> / <strong>admin</strong><br/>Cambia la password da Impostazioni → Utenti</p>
+</div>
+<script>
+(async () => {
+  try {
+    const r = await fetch('/api/site-name');
+    const d = await r.json();
+    if (d.name) document.getElementById('site-name').textContent = d.name;
+  } catch(e) {}
+})();
+
+document.getElementById('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = document.getElementById('submit-btn');
+  const err = document.getElementById('error-msg');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Accesso…';
+  err.style.display = 'none';
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        username: document.getElementById('username').value.trim(),
+        password: document.getElementById('password').value
+      })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window.location.href = '/';
+    } else {
+      err.textContent = data.message || 'Credenziali non valide';
+      err.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Accedi';
+    }
+  } catch(ex) {
+    err.textContent = 'Errore di connessione';
+    err.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Accedi';
+  }
+});
+</script>
+</body>
+</html>

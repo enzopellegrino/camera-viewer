@@ -15,8 +15,12 @@ import os
 import re
 import subprocess
 import threading
+import uuid
+from datetime import timedelta
+from functools import wraps
 
-from flask import Flask, jsonify, redirect, request, send_from_directory
+from flask import Flask, jsonify, redirect, request, send_from_directory, session
+from werkzeug.security import generate_password_hash, check_password_hash
 
 from . import config_store as store
 from . import network
@@ -25,15 +29,220 @@ from . import vpn_openvpn
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
+# ── Flask session secret key (persistent across restarts) ────────────────────
+_SECRET_FILE = os.path.expanduser("~/.config/camera-viewer/.flask_secret")
+
+
+def _load_secret() -> bytes:
+    try:
+        if os.path.exists(_SECRET_FILE):
+            return open(_SECRET_FILE, "rb").read()
+    except OSError:
+        pass
+    key = os.urandom(32)
+    try:
+        os.makedirs(os.path.dirname(_SECRET_FILE), exist_ok=True)
+        open(_SECRET_FILE, "wb").write(key)
+    except OSError:
+        pass
+    return key
+
+
+app.secret_key = _load_secret()
+app.permanent_session_lifetime = timedelta(hours=8)
+
 # Host the portal redirects to (set by the launcher in AP mode)
 PORTAL_HOST = os.environ.get("PORTAL_HOST", "")
+
+
+# ── Auth helpers ─────────────────────────────────────────────────────────────
+
+def login_required(admin: bool = False):
+    """Decorator: require authenticated session. admin=True requires admin role."""
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            if "user_id" not in session:
+                return jsonify({"ok": False, "error": "Non autenticato"}), 401
+            if admin and session.get("role") != "admin":
+                return jsonify({"ok": False, "error": "Accesso riservato agli amministratori"}), 403
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 # ── Pages ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
 def index():
+    if "user_id" not in session:
+        return redirect("/login")
     return send_from_directory(app.template_folder, "index.html")
+
+
+@app.route("/login")
+def login_page():
+    if "user_id" in session:
+        return redirect("/")
+    return send_from_directory(app.template_folder, "login.html")
+
+
+# ── API: Auth ────────────────────────────────────────────────────────────────
+
+@app.route("/api/auth/login", methods=["POST"])
+def api_auth_login():
+    data = request.get_json(force=True, silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    user = store.get_user_by_username(username)
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"ok": False, "message": "Credenziali non valide"}), 401
+    session.permanent = True
+    session["user_id"]  = user["id"]
+    session["username"] = user["username"]
+    session["role"]     = user["role"]
+    return jsonify({"ok": True, "username": user["username"], "role": user["role"]})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def api_auth_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/auth/me")
+def api_auth_me():
+    if "user_id" not in session:
+        return jsonify({"ok": False, "authenticated": False}), 401
+    return jsonify({
+        "ok": True, "authenticated": True,
+        "username": session["username"],
+        "role":     session["role"],
+    })
+
+
+# ── API: Site name ────────────────────────────────────────────────────────────
+
+@app.route("/api/site-name", methods=["GET"])
+def api_site_name_get():
+    return jsonify({"ok": True, "name": store.get_site_name()})
+
+
+@app.route("/api/site-name", methods=["POST"])
+@login_required(admin=True)
+def api_site_name_set():
+    data = request.get_json(force=True, silent=True) or {}
+    store.set_site_name(data.get("name", ""))
+    return jsonify({"ok": True, "name": store.get_site_name()})
+
+
+# ── API: Screens (views) ─────────────────────────────────────────────────────
+
+@app.route("/api/screens", methods=["GET"])
+@login_required()
+def api_screens_list():
+    return jsonify({
+        "screens": store.list_screens(),
+        "active_screen_id": store.get_active_screen_id(),
+    })
+
+
+@app.route("/api/screens", methods=["POST"])
+@login_required(admin=True)
+def api_screens_upsert():
+    data = request.get_json(force=True, silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "message": "Il nome è obbligatorio"}), 400
+    screen = store.upsert_screen(data)
+    return jsonify({"ok": True, "screen": screen})
+
+
+@app.route("/api/screens/<sid>", methods=["PUT"])
+@login_required(admin=True)
+def api_screens_update(sid: str):
+    data = request.get_json(force=True, silent=True) or {}
+    data["id"] = sid
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"ok": False, "message": "Il nome è obbligatorio"}), 400
+    screen = store.upsert_screen(data)
+    return jsonify({"ok": True, "screen": screen})
+
+
+@app.route("/api/screens/<sid>", methods=["DELETE"])
+@login_required(admin=True)
+def api_screens_delete(sid: str):
+    # Cannot delete last screen
+    if len(store.list_screens()) <= 1:
+        return jsonify({"ok": False, "message": "Non puoi eliminare l'ultima vista"}), 400
+    ok = store.delete_screen(sid)
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/screens/<sid>/activate", methods=["POST"])
+@login_required()
+def api_screens_activate(sid: str):
+    ok = store.set_active_screen(sid)
+    if not ok:
+        return jsonify({"ok": False, "message": "Vista non trovata"}), 404
+    # Send command to viewer
+    try:
+        with open(_VIEWER_CMD_FILE, "w") as f:
+            f.write(f"screen:{sid}")
+    except OSError:
+        pass
+    return jsonify({"ok": True, "active_screen_id": sid})
+
+
+# ── API: Users ────────────────────────────────────────────────────────────────
+
+@app.route("/api/users", methods=["GET"])
+@login_required(admin=True)
+def api_users_list():
+    return jsonify({"users": store.list_users()})
+
+
+@app.route("/api/users", methods=["POST"])
+@login_required(admin=True)
+def api_users_create():
+    data = request.get_json(force=True, silent=True) or {}
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    role     = data.get("role", "operator")
+    if not username or not password:
+        return jsonify({"ok": False, "message": "Username e password obbligatori"}), 400
+    if role not in store.VALID_ROLES:
+        return jsonify({"ok": False, "message": "Ruolo non valido"}), 400
+    if store.get_user_by_username(username):
+        return jsonify({"ok": False, "message": "Username già in uso"}), 400
+    user = store.create_user(username, generate_password_hash(password), role)
+    return jsonify({"ok": True, "user": user})
+
+
+@app.route("/api/users/<uid>/password", methods=["PUT"])
+@login_required()
+def api_users_change_password(uid: str):
+    # Admin can change any password; user can only change own
+    if session.get("role") != "admin" and session.get("user_id") != uid:
+        return jsonify({"ok": False, "message": "Non autorizzato"}), 403
+    data = request.get_json(force=True, silent=True) or {}
+    password = (data.get("password") or "").strip()
+    if len(password) < 4:
+        return jsonify({"ok": False, "message": "Password troppo corta (min 4 caratteri)"}), 400
+    ok = store.update_user_password(uid, generate_password_hash(password))
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/users/<uid>", methods=["DELETE"])
+@login_required(admin=True)
+def api_users_delete(uid: str):
+    if session.get("user_id") == uid:
+        return jsonify({"ok": False, "message": "Non puoi eliminare te stesso"}), 400
+    ok = store.delete_user(uid)
+    if not ok:
+        return jsonify({"ok": False, "message": "Impossibile eliminare (ultimo admin?)"}), 400
+    return jsonify({"ok": True})
 
 
 # ── Captive portal detection (iOS / Android / Windows) ───────────────────────
@@ -55,16 +264,19 @@ def captive_detect():
 # ── API: status & network ────────────────────────────────────────────────────
 
 @app.route("/api/status")
+@login_required()
 def api_status():
     return jsonify(network.current_status())
 
 
 @app.route("/api/wifi/scan")
+@login_required()
 def api_wifi_scan():
     return jsonify({"networks": network.scan_wifi()})
 
 
 @app.route("/api/wifi/connect", methods=["POST"])
+@login_required(admin=True)
 def api_wifi_connect():
     data = request.get_json(force=True, silent=True) or {}
     ssid = data.get("ssid", "")
@@ -79,6 +291,7 @@ def api_wifi_connect():
 
 
 @app.route("/api/network/mode", methods=["POST"])
+@login_required(admin=True)
 def api_network_mode():
     data = request.get_json(force=True, silent=True) or {}
     mode = data.get("mode", "dhcp")
@@ -91,11 +304,13 @@ def api_network_mode():
 # ── API: cameras ──────────────────────────────────────────────────────────────
 
 @app.route("/api/cameras", methods=["GET"])
+@login_required()
 def api_cameras_list():
     return jsonify({"cameras": store.list_cameras(), "layout": store.get_layout()})
 
 
 @app.route("/api/cameras", methods=["POST"])
+@login_required(admin=True)
 def api_cameras_upsert():
     data = request.get_json(force=True, silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -109,6 +324,7 @@ def api_cameras_upsert():
 
 
 @app.route("/api/cameras/<cam_id>", methods=["DELETE"])
+@login_required(admin=True)
 def api_cameras_delete(cam_id: str):
     ok = store.delete_camera(cam_id)
     return jsonify({"ok": ok})
@@ -117,11 +333,13 @@ def api_cameras_delete(cam_id: str):
 # ── API: settings / layout ────────────────────────────────────────────────────
 
 @app.route("/api/settings", methods=["GET"])
+@login_required()
 def api_settings_get():
     return jsonify({"settings": store.get_settings(), "layout": store.get_layout()})
 
 
 @app.route("/api/settings", methods=["POST"])
+@login_required(admin=True)
 def api_settings_set():
     data = request.get_json(force=True, silent=True) or {}
     patch = {}
@@ -150,6 +368,7 @@ def api_settings_set():
 
 
 @app.route("/api/restart-viewer", methods=["POST"])
+@login_required()
 def api_restart_viewer():
     """Kill the viewer and relaunch it with the correct display environment.
 
@@ -192,6 +411,7 @@ _VIEWER_CMD_FILE = "/tmp/cv-viewer-cmd"
 
 
 @app.route("/api/viewer/zoom", methods=["POST"])
+@login_required()
 def api_viewer_zoom():
     """Zoom a specific camera on the monitor (portal remote control).
 
@@ -248,6 +468,7 @@ def _set_pcmanfm_wallpaper(path: str) -> None:
 
 
 @app.route("/api/wallpaper", methods=["GET"])
+@login_required()
 def api_wallpaper_get():
     exists = os.path.exists(_WALLPAPER_PATH)
     return jsonify({"ok": True, "custom": exists,
@@ -255,6 +476,7 @@ def api_wallpaper_get():
 
 
 @app.route("/api/wallpaper/image", methods=["GET"])
+@login_required()
 def api_wallpaper_image():
     if not os.path.exists(_WALLPAPER_PATH):
         return "", 404
@@ -265,6 +487,7 @@ def api_wallpaper_image():
 
 
 @app.route("/api/wallpaper", methods=["POST"])
+@login_required(admin=True)
 def api_wallpaper_set():
     f = request.files.get("file")
     if not f or not f.filename:
@@ -287,6 +510,7 @@ def api_wallpaper_set():
 
 
 @app.route("/api/wallpaper", methods=["DELETE"])
+@login_required(admin=True)
 def api_wallpaper_delete():
     default = "/usr/share/rpd-wallpaper/aurora.jpg"
     if os.path.exists(_WALLPAPER_PATH):
@@ -304,6 +528,7 @@ _PLACEHOLDER_PATH = os.path.expanduser("~/.config/camera-viewer/placeholder.jpg"
 
 
 @app.route("/api/placeholder", methods=["GET"])
+@login_required()
 def api_placeholder_get():
     exists = os.path.exists(_PLACEHOLDER_PATH)
     return jsonify({"ok": True, "custom": exists,
@@ -311,6 +536,7 @@ def api_placeholder_get():
 
 
 @app.route("/api/placeholder/image", methods=["GET"])
+@login_required()
 def api_placeholder_image():
     if not os.path.exists(_PLACEHOLDER_PATH):
         return "", 404
@@ -321,6 +547,7 @@ def api_placeholder_image():
 
 
 @app.route("/api/placeholder", methods=["POST"])
+@login_required(admin=True)
 def api_placeholder_set():
     f = request.files.get("file")
     if not f or not f.filename:
@@ -336,6 +563,7 @@ def api_placeholder_set():
 
 
 @app.route("/api/placeholder", methods=["DELETE"])
+@login_required(admin=True)
 def api_placeholder_delete():
     if os.path.exists(_PLACEHOLDER_PATH):
         os.remove(_PLACEHOLDER_PATH)
@@ -354,6 +582,7 @@ def _parse_subnets(value) -> list[str]:
 
 
 @app.route("/api/vpn", methods=["GET"])
+@login_required()
 def api_vpn_status():
     """Report the active/configured tunnel (WireGuard or OpenVPN)."""
     ovpn = vpn_openvpn.status()
@@ -364,6 +593,7 @@ def api_vpn_status():
 
 
 @app.route("/api/vpn", methods=["POST"])
+@login_required(admin=True)
 def api_vpn_apply():
     data = request.get_json(force=True, silent=True) or {}
     subnets = _parse_subnets(data.get("camera_subnets"))
@@ -415,6 +645,7 @@ def api_vpn_apply():
 
 
 @app.route("/api/vpn/disable", methods=["POST"])
+@login_required(admin=True)
 def api_vpn_disable():
     # disable whichever is active
     ok1, _ = vpn.disable()
@@ -428,6 +659,7 @@ def api_vpn_disable():
 
 
 @app.route("/api/vpn", methods=["DELETE"])
+@login_required(admin=True)
 def api_vpn_remove():
     vpn.remove()
     vpn_openvpn.remove()
@@ -447,6 +679,7 @@ def _reboot_soon(delay: float = 2.0):
 
 
 @app.route("/api/apply", methods=["POST"])
+@login_required(admin=True)
 def api_apply():
     """Finish setup: switch to operational mode and reboot."""
     if not store.has_cameras():
@@ -459,6 +692,7 @@ def api_apply():
 
 
 @app.route("/api/setup-mode", methods=["POST"])
+@login_required(admin=True)
 def api_setup_mode():
     """Re-enter provisioning mode on next boot."""
     store.set_force_setup(True)
@@ -467,6 +701,7 @@ def api_setup_mode():
 
 
 @app.route("/api/mode")
+@login_required()
 def api_mode():
     """Report whether the device would boot into provisioning."""
     return jsonify({
