@@ -125,9 +125,12 @@ df -h "\$HOME" | tail -1
 
 echo "→ Avvio container Ubuntu amd64 con accesso privilegiato..."
 
-# Container Ubuntu dentro la VM = loop device reali disponibili
+# Container Ubuntu dentro la VM — passa loop device dalla VM host
+# Senza --device /dev/loop*, losetup fallisce anche con --privileged
 sudo podman run --rm --privileged \
     --platform linux/amd64 \
+    --device /dev/loop-control \
+    \$(for i in \$(seq 0 15); do echo "--device /dev/loop\$i"; done) \
     -v "\$CV_BUILD_DIR":/setup:z \
     -v "\$CV_OUT_DIR":/output:z \
     ubuntu:24.04 \
