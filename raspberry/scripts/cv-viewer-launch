@@ -44,6 +44,43 @@ cd /home/pi/camera-viewer || exit 0
 PYTHON3="python3"
 [ -x ".venv/bin/python3" ] && PYTHON3=".venv/bin/python3"
 
+# ── Mostra IP del portale su schermo al boot ────────────────────────────────
+# Aspetta max 15s che la rete sia disponibile, poi mostra l'IP con xterm/OSD.
+# Si chiude automaticamente dopo 10s o quando l'utente configura telecamere.
+_show_ip_overlay() {
+    local ip timeout=15
+    for i in $(seq 1 $timeout); do
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+        [ -n "$ip" ] && break
+        sleep 1
+    done
+    [ -z "$ip" ] && ip="(rete non disponibile)"
+
+    # Mostra overlay con IP usando xterm (disponibile su tutti i sistemi X11)
+    xterm -T "Camera Viewer" \
+          -fa "Monospace" -fs 18 \
+          -bg "#0c0e18" -fg "#4f72f7" \
+          -geometry 55x8+0+0 \
+          -e bash -c "
+echo ''
+echo '  ╔═══════════════════════════════════════════╗'
+echo '  ║   🎥  Camera Viewer v2.0                  ║'
+echo '  ║       di Enzo Pellegrino                  ║'
+echo '  ╠═══════════════════════════════════════════╣'
+echo '  ║   Portale:  http://${ip}          ║'
+echo '  ║   Login:    admin / admin                 ║'
+echo '  ╚═══════════════════════════════════════════╝'
+echo ''
+echo '  (si chiude automaticamente in 10 secondi...)'
+sleep 10
+" &
+}
+
+# Mostra l'IP solo se non ci sono ancora telecamere configurate
+if ! $PYTHON3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG_DIR/config.json')).get('cameras') else 1)" 2>/dev/null; then
+    _show_ip_overlay
+fi
+
 # Supervisor loop: (re)start the viewer whenever it exits, as long as we are
 # still in operational mode (cameras present, no force-setup flag).
 while true; do
