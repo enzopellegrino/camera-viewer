@@ -109,6 +109,8 @@ def _normalize(cfg: dict) -> dict:
         cfg["active_screen_id"] = cfg["screens"][0]["id"]
     # Migrate: site_name
     cfg.setdefault("site_name", "Camera Viewer")
+    # Migrate: rimuovi vecchia chiave vpn (sostituita da vpn_profiles)
+    cfg.pop("vpn", None)
     # Migrate: users — create default admin on first run
     if not isinstance(cfg.get("users"), list) or not cfg["users"]:
         from werkzeug.security import generate_password_hash
