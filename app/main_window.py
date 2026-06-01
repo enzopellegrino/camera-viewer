@@ -220,6 +220,8 @@ class MainWindow(QMainWindow):
         self.resize(1280, 720)
 
         root = QWidget()
+        root.setMouseTracking(True)
+        self.setMouseTracking(True)
         self.setCentralWidget(root)
         self._root_vbox = QVBoxLayout(root)
         self._root_vbox.setContentsMargins(0, 0, 0, 0)
@@ -240,6 +242,10 @@ class MainWindow(QMainWindow):
         self._switcher = SceneSwitcherBar(root)
         self._switcher.screen_requested.connect(self._load_screen)
         self._switcher.raise_()
+
+        # Global wheel event filter: scroll anywhere → switch view
+        from PySide6.QtWidgets import QApplication as _QApp
+        _QApp.instance().installEventFilter(self)
 
         self._start_cmd_watcher()
         self._refresh_switcher()
@@ -510,9 +516,20 @@ class MainWindow(QMainWindow):
 
     # ── Mouse / resize (scene switcher) ──────────────────────────────────────
 
+    def eventFilter(self, obj, event):
+        """Cattura rotella del mouse da qualsiasi widget → cambia vista."""
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.Wheel and len(self.config.screens) > 1:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self._prev_screen()
+            elif delta < 0:
+                self._next_screen()
+            return True   # evento consumato, non fa scroll su altro
+        return False
+
     def mouseMoveEvent(self, event):
         super().mouseMoveEvent(event)
-        # Qualsiasi movimento espande la barra viste
         self._switcher.expand_temporarily()
 
     def resizeEvent(self, event):
