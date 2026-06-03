@@ -272,6 +272,11 @@ chmod +x /usr/local/bin/pcmanfm
 [ -f raspberry/scripts/cv-network-mode ] && \
     install -m 755 raspberry/scripts/cv-network-mode \
         /usr/local/sbin/cv-network-mode
+
+# Dispatcher NetworkManager: hotspot auto quando ethernet cade
+[ -f raspberry/scripts/cv-nm-dispatcher ] && \
+    install -m 755 raspberry/scripts/cv-nm-dispatcher \
+        /etc/NetworkManager/dispatcher.d/99-cv-hotspot
 [ -f raspberry/systemd/camera-network-mode.service ] && \
     install -m 644 raspberry/systemd/camera-network-mode.service \
         /etc/systemd/system/camera-network-mode.service && \

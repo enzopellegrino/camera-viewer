@@ -32,6 +32,7 @@ _SWITCHER_BTN = """
 """
 
 _HINT_STYLE = "color: rgba(255,255,255,40%); font-size: 11px;"
+_IP_STYLE   = "color: rgba(79,200,247,80%); font-size: 11px; font-family: monospace;"
 
 
 class SceneSwitcherBar(QWidget):
@@ -70,6 +71,20 @@ class SceneSwitcherBar(QWidget):
         self._hint.setStyleSheet(_HINT_STYLE)
         self._hint.setAlignment(Qt.AlignCenter)
         self._hbox.insertWidget(1, self._hint)
+
+        # Label IP portale — visibile quando la barra è espansa
+        self._ip_label = QLabel("")
+        self._ip_label.setStyleSheet(_IP_STYLE)
+        self._ip_label.setAlignment(Qt.AlignCenter)
+        self._ip_label.hide()
+        self._hbox.addWidget(self._ip_label)
+
+        # Aggiorna IP ogni 30 secondi
+        self._ip_timer = QTimer(self)
+        self._ip_timer.setInterval(30000)
+        self._ip_timer.timeout.connect(self._update_ip)
+        self._ip_timer.start()
+        self._update_ip()
 
         self._collapse_timer = QTimer(self)
         self._collapse_timer.setSingleShot(True)
@@ -121,6 +136,17 @@ class SceneSwitcherBar(QWidget):
         for i, btn in enumerate(self._buttons):
             btn.setChecked(i == idx)
 
+    def _update_ip(self) -> None:
+        """Aggiorna la label con l'IP del portale."""
+        import subprocess
+        try:
+            ip = subprocess.check_output(
+                ["hostname", "-I"], timeout=2, text=True
+            ).strip().split()[0]
+            self._ip_label.setText(f"🌐 http://{ip}")
+        except Exception:
+            self._ip_label.setText("")
+
     def expand_temporarily(self) -> None:
         """Show full-height bar and schedule collapse."""
         if len(self._screens) < 2:
@@ -144,6 +170,7 @@ class SceneSwitcherBar(QWidget):
         for btn in self._buttons:
             btn.setVisible(expanded)
         self._hint.setVisible(not expanded)
+        self._ip_label.setVisible(expanded and bool(self._ip_label.text()))
         self.update()
 
     # ── Drawing ───────────────────────────────────────────────────────────────

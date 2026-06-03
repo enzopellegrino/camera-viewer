@@ -1,0 +1,41 @@
+#!/bin/bash
+# cv-nm-dispatcher — NetworkManager dispatcher
+# Avvia/ferma l'hotspot WiFi automaticamente quando l'ethernet cambia stato.
+#
+# Installato in /etc/NetworkManager/dispatcher.d/99-cv-hotspot
+# NetworkManager lo chiama con: <interfaccia> <evento>
+
+INTERFACE="$1"
+EVENT="$2"
+LOG="/tmp/cv-network.log"
+
+log() { echo "[$(date '+%H:%M:%S')] dispatcher: $*" >> "$LOG"; }
+
+# Reagisci solo agli eventi ethernet
+case "$INTERFACE" in
+    eth*|eno*|enp*|enx*) ;;  # interfacce ethernet
+    *) exit 0 ;;
+esac
+
+log "Evento: $INTERFACE → $EVENT"
+
+case "$EVENT" in
+    down|connectivity-change)
+        # Controlla se c'è ancora ethernet attiva
+        ETH_ACTIVE=$(nmcli -t -f TYPE,STATE dev 2>/dev/null | grep "^ethernet:connected" || true)
+        if [ -z "$ETH_ACTIVE" ]; then
+            log "Ethernet disconnessa — avvio hotspot WiFi..."
+            # Esegui cv-network-mode in background (gestisce la creazione AP)
+            /usr/local/sbin/cv-network-mode &
+        fi
+        ;;
+    up)
+        # Ethernet tornata — ferma l'hotspot se attivo
+        AP_CON=$(nmcli -t -f NAME,TYPE con show --active 2>/dev/null | grep "wifi" | grep -i "hotspot\|Camera-Viewer" | cut -d: -f1 | head -1)
+        if [ -n "$AP_CON" ]; then
+            log "Ethernet ripristinata — fermo hotspot '$AP_CON'..."
+            nmcli con down "$AP_CON" 2>/dev/null || true
+            rm -f /tmp/cv-ap-mode
+        fi
+        ;;
+esac
