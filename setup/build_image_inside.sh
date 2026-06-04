@@ -164,7 +164,7 @@ apt-get install -y -q --no-install-recommends openvpn wireguard-tools
 
 # Utilities
 apt-get install -y -q --no-install-recommends \
-    unclutter x11-xserver-utils feh \
+    unclutter x11-xserver-utils feh xterm \
     pciutils net-tools iproute2 \
     htop nano
 
