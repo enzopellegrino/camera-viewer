@@ -96,30 +96,35 @@ log "Connettiti alla rete WiFi '$AP_SSID' e apri http://${AP_IP}"
 echo "$AP_SSID|$AP_IP" > /tmp/cv-ap-mode
 
 # Mostra overlay sullo schermo con info WiFi + password
-export DISPLAY="${DISPLAY:-:0}"
-export XAUTHORITY="${XAUTHORITY:-/home/pi/.Xauthority}"
+# Lancia come utente pi con accesso a X11 (il dispatcher gira come root)
 pkill -f "xterm.*Camera-Viewer-AP" 2>/dev/null || true
-xterm -T "Camera-Viewer-AP" \
-    -fa "Monospace" -fs 16 \
-    -bg "#0c0e18" -fg "#4f72f7" \
-    -geometry 55x12+0+0 \
-    -e bash -c "
+sudo -u pi bash -c "
+DISPLAY=:0
+XAUTHORITY=/home/pi/.Xauthority
+export DISPLAY XAUTHORITY
+xterm -T 'Camera-Viewer-AP' \
+    -fa 'Monospace' -fs 16 \
+    -bg '#0c0e18' -fg '#4f72f7' \
+    -geometry 58x14+0+0 \
+    -e bash -c '
 while true; do
-echo ''
-echo '  ╔═══════════════════════════════════════════╗'
-echo '  ║   🎥  Camera Viewer v2.0                  ║'
-echo '  ╠═══════════════════════════════════════════╣'
-echo '  ║  📡 Rete ethernet assente — WiFi attivo    ║'
-echo '  ║                                           ║'
-echo '  ║  1. Connettiti al WiFi:                   ║'
-echo '  ║     Rete:    Camera-Viewer                ║'
-echo '  ║     Password: cameraviewer                ║'
-echo '  ║                                           ║'
-echo '  ║  2. Apri nel browser:                     ║'
-echo '  ║     http://${AP_IP}                  ║'
-echo '  ║                                           ║'
-echo '  ║  3. Login: admin / admin                  ║'
-echo '  ╚═══════════════════════════════════════════╝'
+clear
+echo \"\"
+echo \"  ╔══════════════════════════════════════════════╗\"
+echo \"  ║   🎥  Camera Viewer v2.0                     ║\"
+echo \"  ╠══════════════════════════════════════════════╣\"
+echo \"  ║  📡 Ethernet assente — WiFi hotspot attivo   ║\"
+echo \"  ║                                              ║\"
+echo \"  ║  Connettiti al WiFi:                         ║\"
+echo \"  ║    Rete:     Camera-Viewer                   ║\"
+echo \"  ║    Password: cameraviewer                    ║\"
+echo \"  ║                                              ║\"
+echo \"  ║  Poi apri nel browser:                       ║\"
+echo \"  ║    http://${AP_IP}                      ║\"
+echo \"  ║                                              ║\"
+echo \"  ║  Login: admin / admin                        ║\"
+echo \"  ╚══════════════════════════════════════════════╝\"
 sleep 30
 done
-" &
+' &
+" 2>/dev/null &
