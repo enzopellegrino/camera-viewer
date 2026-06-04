@@ -73,8 +73,8 @@ USB="$1"
 # Formatta con 3 partizioni
 sudo parted -s "$USB" mklabel gpt
 sudo parted -s "$USB" mkpart EFI    fat32  1MiB   257MiB
-sudo parted -s "$USB" mkpart System ext4   257MiB 12545MiB
-sudo parted -s "$USB" mkpart Data   ext4   12545MiB 100%
+sudo parted -s "$USB" mkpart System ext4   257MiB 10497MiB
+sudo parted -s "$USB" mkpart Data   ext4   10497MiB 100%
 sudo parted -s "$USB" set 1 esp on
 sleep 2
 sudo mkfs.vfat -F32 -n "CV-EFI"    "${USB}1"
