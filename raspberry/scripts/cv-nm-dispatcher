@@ -40,5 +40,9 @@ case "$EVENT" in
         rm -f /tmp/cv-ap-mode 2>/dev/null || true
         # Chiudi overlay xterm se aperto
         pkill -f "xterm.*Camera-Viewer-AP" 2>/dev/null || true
+        # Rimuovi regole NAT del captive portal (bloccano il portale su WiFi)
+        nft flush table ip nat 2>/dev/null || nft delete table ip nat 2>/dev/null || true
+        iptables -t nat -F 2>/dev/null || true
+        log "Regole NAT hotspot rimosse"
         ;;
 esac
