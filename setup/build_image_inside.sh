@@ -1,12 +1,13 @@
 #!/bin/bash
 # =============================================================================
-# Camera Viewer — Build script (gira nella VM Podman su macOS)
+# Camera Viewer — Build script (gira sul NUC via SSH)
 #
 # Crea un'immagine disco Live USB con 3 partizioni:
-#   1. EFI    (512MB)  — GRUB bootloader
-#   2. System (8GB)    — Ubuntu minimal + Camera Viewer
+#   1. EFI    (256MB)  — GRUB standalone (grub-mkstandalone)
+#   2. System (5GB)    — Ubuntu minimal + Camera Viewer
 #   3. Data   (resto)  — Config persistente (telecamere, VPN, ecc.)
 #
+# Gira su Ubuntu x86_64 reale — GRUB, losetup e debootstrap funzionano.
 # NON installa nulla sull'hard disk del PC — gira dalla USB.
 # =============================================================================
 set -euo pipefail
@@ -19,8 +20,8 @@ IMG_FILE="$OUTPUT_DIR/camera-viewer-v${VERSION}.img"
 mkdir -p "$OUTPUT_DIR"
 IMG_SIZE_MB=6144    # 6GB immagine raw (compressa xz → ~600MB)
 EFI_SIZE_MB=256     # EFI 256MB
-SYSTEM_SIZE_MB=5120 # Sistema 5GB (necessario per Ubuntu + PySide6 + pacchetti)
-# DATA occupa il resto (~768MB, espandibile dopo il primo avvio)
+SYSTEM_SIZE_MB=5120 # Sistema 5GB
+# DATA occupa il resto
 
 log()  { echo -e "\n  \033[1m>>> $*\033[0m"; }
 ok()   { echo -e "  \033[32m✓\033[0m $*"; }
@@ -29,20 +30,19 @@ info() { echo -e "  \033[36m→\033[0m $*"; }
 echo ""
 echo "  ╔══════════════════════════════════════════════════╗"
 echo "  ║   Camera Viewer v${VERSION} — Image Builder         ║"
-echo "  ║   Build dentro container Podman                 ║"
+echo "  ║   Build su NUC (Ubuntu x86_64 — GRUB nativo)   ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo ""
 
 # ── Installa strumenti build ──────────────────────────────────────────────────
 log "Installazione strumenti build..."
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -q
-mkdir -p /var/cache/apt/archives
+apt-get update -q 2>/dev/null
 apt-get install -y -q --no-install-recommends \
     debootstrap parted dosfstools e2fsprogs \
-    grub-efi-amd64-bin grub-pc-bin grub2-common \
-    xz-utils rsync
-apt-get clean
+    grub-efi-amd64-bin grub-efi-amd64 grub2-common \
+    xz-utils rsync 2>/dev/null
+apt-get clean 2>/dev/null
 ok "Strumenti installati"
 
 # ── Crea immagine disco raw ───────────────────────────────────────────────────

@@ -1,12 +1,15 @@
 #!/bin/bash
 # =============================================================================
-# Camera Viewer — Build immagine Live USB
-# Creato da Enzo Pellegrino
+# Camera Viewer — Build immagine Live USB (tramite NUC)
 #
-# Usa la VM Linux di Podman (non il container) per le operazioni privilegiate.
-# La VM ha accesso diretto ai loop device — nessun problema di permessi.
+# Usa il NUC come build host (Ubuntu x86_64 reale) invece di Podman.
+# Nessun problema di GRUB, loop device, container o architettura.
 #
-# Uso: bash make-image.sh
+# Prerequisiti: NUC acceso e raggiungibile via SSH
+#
+# Uso:
+#   bash make-image.sh [IP_NUC]
+#   bash make-image.sh               # usa camera-viewer.local
 # =============================================================================
 set -euo pipefail
 
@@ -15,7 +18,11 @@ VERSION="2.0"
 OUTPUT_DIR="$SCRIPT_DIR/dist"
 OUTPUT_IMG="$OUTPUT_DIR/camera-viewer-v${VERSION}.img.xz"
 APP_TGZ="$OUTPUT_DIR/camera-viewer-app.tar.gz"
-SETUP_SCRIPT="$SCRIPT_DIR/setup/build_image_inside.sh"
+BUILD_SCRIPT="$SCRIPT_DIR/setup/build_image_inside.sh"
+
+NUC_IP="${1:-}"
+NUC_USER="pi"
+NUC_PASS="N1computer@2019"
 
 # Colori
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'; C='\033[0;36m'; B='\033[1m'; E='\033[0m'
@@ -28,123 +35,9 @@ hdr() {
     echo "  ║       Creato da Enzo Pellegrino                 ║"
     echo "  ╚══════════════════════════════════════════════════╝"
     echo -e "${E}"
-}
-
-# ── Modalità repair GRUB ──────────────────────────────────────────────────────
-# Uso: bash make-image.sh --repair-grub
-# Ripara solo il GRUB sull'immagine esistente senza ricostruire tutto.
-# Richiede l'immagine compressa in dist/. Durata: ~5 min.
-if [[ "${1:-}" == "--repair-grub" ]]; then
-    hdr
-    echo -e "  ${Y}Modalità REPAIR GRUB${E} — ripara bootloader senza ricostruire l'immagine"
+    echo "  Builder: NUC (Ubuntu x86_64 reale — GRUB garantito)"
     echo ""
-    [ -f "$OUTPUT_IMG" ] || err "Immagine non trovata: $OUTPUT_IMG\n  Esegui prima: bash make-image.sh"
-
-    # Ottieni SSH info VM
-    VM_NAME=$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 | tr -d '* ')
-    VM_JSON=$(podman machine inspect "$VM_NAME" 2>/dev/null)
-    SSH_PORT=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['Port'])")
-    SSH_KEY=$(echo "$VM_JSON"  | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['IdentityPath'])")
-    SSH_USER=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['RemoteUsername'])")
-    SSH_OPTS=(-i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=no -o LogLevel=ERROR)
-    SCP_OPTS=(-i "$SSH_KEY" -P "$SSH_PORT" -o StrictHostKeyChecking=no -o LogLevel=ERROR)
-    SSH_HOST="${SSH_USER}@localhost"
-
-    echo "[1/4] Preparo directory nella VM e copio immagine..."
-    # Assicura che cv-output appartenga all'utente (non root dalla build precedente)
-    ssh "${SSH_OPTS[@]}" "$SSH_HOST" \
-        "sudo rm -rf \$HOME/cv-output 2>/dev/null; mkdir -p \$HOME/cv-output"
-    scp "${SCP_OPTS[@]}" "$OUTPUT_IMG" "${SSH_HOST}:cv-output/"
-
-    echo "[2/4] Ripara GRUB nella VM (grub-mkstandalone via container Ubuntu)..."
-    ssh "${SSH_OPTS[@]}" "$SSH_HOST" << REPAIREOF
-set -e
-sudo modprobe loop max_loop=16 2>/dev/null || true
-for i in \$(seq 0 15); do [ -b "/dev/loop\$i" ] || sudo mknod "/dev/loop\$i" b 7 "\$i" 2>/dev/null || true; done
-cd \$HOME/cv-output/
-
-IMG_RAW="camera-viewer-v${VERSION}.img"
-if [ ! -f "\$IMG_RAW" ]; then
-    echo "Decomprimo immagine..."
-    xz -d -k camera-viewer-v${VERSION}.img.xz
-fi
-
-LOOP=\$(sudo losetup -f --show -P "\$IMG_RAW")
-echo "Loop: \$LOOP"
-sudo partprobe "\$LOOP" 2>/dev/null || true; sleep 2
-
-sudo mkdir -p /mnt/cv-repair/boot/efi
-sudo mount \${LOOP}p2 /mnt/cv-repair
-sudo mount \${LOOP}p1 /mnt/cv-repair/boot/efi
-
-# grub-mkstandalone nel container Ubuntu: crea EFI autocontenuto
-sudo podman run --rm --privileged \
-    --platform linux/amd64 \
-    -v /mnt/cv-repair:/target:z \
-    ubuntu:24.04 bash -c "
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -q 2>/dev/null
-apt-get install -y -q --no-install-recommends grub-efi-amd64-bin 2>&1 | tail -2
-
-KERNEL=\$(ls /target/boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
-INITRD=\$(ls /target/boot/initrd.img-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/target||')
-echo Kernel: \$KERNEL
-
-cat > /tmp/grub.cfg << CFG
-set timeout=8
-set default=0
-set color_normal=cyan/black
-set color_highlight=black/cyan
-set menu_color_normal=white/black
-set menu_color_highlight=black/cyan
-echo '  Camera Viewer v${VERSION}'
-echo '  di Enzo Pellegrino'
-menuentry ' Avvia Camera Viewer' {
-    search --no-floppy --label --set=root cv-system
-    linux  \$KERNEL root=LABEL=cv-system rw quiet loglevel=3
-    initrd \$INITRD
 }
-menuentry ' Modalita sicura' {
-    search --no-floppy --label --set=root cv-system
-    linux  \$KERNEL root=LABEL=cv-system rw nomodeset loglevel=3
-    initrd \$INITRD
-}
-CFG
-
-mkdir -p /target/boot/efi/EFI/BOOT
-grub-mkstandalone \
-    --format=x86_64-efi \
-    --output=/target/boot/efi/EFI/BOOT/BOOTX64.EFI \
-    --modules='part_gpt part_msdos fat ext2 normal boot linux initrd search search_label echo all_video video_fb' \
-    --locales='' --fonts='' \
-    'boot/grub/grub.cfg=/tmp/grub.cfg'
-
-cp /tmp/grub.cfg /target/boot/grub/grub.cfg 2>/dev/null || true
-ls -lh /target/boot/efi/EFI/BOOT/BOOTX64.EFI
-echo GRUB_OK
-"
-
-sudo umount /mnt/cv-repair/boot/efi 2>/dev/null || true
-sudo umount /mnt/cv-repair 2>/dev/null || true
-sudo losetup -d "\$LOOP" 2>/dev/null || true
-echo "GRUB riparato con grub-mkstandalone!"
-REPAIREOF
-
-    echo "[3/4] Ricomprimi immagine (veloce, xz -3)..."
-    ssh "${SSH_OPTS[@]}" "$SSH_HOST" \
-        "cd \$HOME/cv-output/ && rm -f camera-viewer-v${VERSION}.img.xz && XZ_LEVEL=3 xz -3 -T0 camera-viewer-v${VERSION}.img && ls -lh camera-viewer-v${VERSION}.img.xz"
-
-    echo "[4/4] Copia immagine riparata..."
-    scp "${SCP_OPTS[@]}" "${SSH_HOST}:cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
-    SIZE=$(ls -lh "$OUTPUT_IMG" | awk '{print $5}')
-
-    echo ""
-    echo -e "${G}${B}╔══════════════════════════════════════════════════╗${E}"
-    echo -e "${G}${B}║  ✅ GRUB riparato! ($SIZE)                       ║${E}"
-    echo -e "${G}${B}║  Scrivi sulla USB: bash make-usb.sh              ║${E}"
-    echo -e "${G}${B}╚══════════════════════════════════════════════════╝${E}"
-    exit 0
-fi
 
 ok()   { echo -e "  ${G}✓${E} $1"; }
 warn() { echo -e "  ${Y}⚠${E}  $1"; }
@@ -154,134 +47,85 @@ TOTAL=5
 
 hdr
 
-# ── Step 1: Verifica Podman ───────────────────────────────────────────────────
-step 1 "Verifica Podman..."
-command -v podman &>/dev/null || err "Podman non trovato"
-ok "Podman $(podman --version | awk '{print $3}')"
-
-# Avvia la VM di Podman se non è attiva
-VM_STATE=$(podman machine inspect --format '{{.State}}' 2>/dev/null | head -1 || echo "stopped")
-if [[ "$VM_STATE" != "running" ]]; then
-    echo "  → Avvio VM Podman..."
-    podman machine start
-    sleep 5
+# ── Trova IP NUC ──────────────────────────────────────────────────────────────
+if [ -z "$NUC_IP" ]; then
+    echo -e "  Ricerca NUC in rete..."
+    NUC_IP=$(python3 -c "import socket; print(socket.gethostbyname('camera-viewer.local'))" 2>/dev/null || true)
+    if [ -z "$NUC_IP" ]; then
+        # Scan veloce
+        for ip in $(seq 1 254); do
+            (ping -c1 -W1 "192.168.10.$ip" &>/dev/null && \
+             nc -z -w1 "192.168.10.$ip" 22 2>/dev/null && \
+             sshpass -p "$NUC_PASS" ssh -o StrictHostKeyChecking=no \
+                 -o PasswordAuthentication=yes -o PubkeyAuthentication=no \
+                 -o ConnectTimeout=2 "$NUC_USER@192.168.10.$ip" \
+                 "hostname | grep -q camera-viewer && echo 192.168.10.$ip" 2>/dev/null) &
+        done
+        wait
+        NUC_IP=$(jobs -p | xargs -I{} wait {} 2>/dev/null || true)
+    fi
+    [ -z "$NUC_IP" ] && read -rp "  Inserisci IP del NUC: " NUC_IP
 fi
-ok "VM Podman attiva"
 
-ok "VM Podman verificata"
+SSH_OPTS=(-o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no)
+SCP_OPTS=(-o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no)
 
-# ── Step 2: Prepara archivio app ─────────────────────────────────────────────
+# ── Step 1: Verifica NUC ──────────────────────────────────────────────────────
+step 1 "Connessione al NUC ($NUC_IP)..."
+HOSTNAME=$(sshpass -p "$NUC_PASS" ssh "${SSH_OPTS[@]}" "$NUC_USER@$NUC_IP" "hostname" 2>/dev/null) \
+    || err "NUC non raggiungibile su $NUC_IP"
+ok "NUC: $HOSTNAME ($NUC_IP)"
+
+DISK_FREE=$(sshpass -p "$NUC_PASS" ssh "${SSH_OPTS[@]}" "$NUC_USER@$NUC_IP" \
+    "df -BG / | tail -1 | awk '{print \$4}'" 2>/dev/null)
+ok "Spazio libero NUC: $DISK_FREE"
+
+# ── Step 2: Prepara archivio app ──────────────────────────────────────────────
 step 2 "Creazione archivio app..."
 mkdir -p "$OUTPUT_DIR"
 cd "$SCRIPT_DIR"
 tar czf "$APP_TGZ" \
     --exclude='.git' --exclude='.venv' --exclude='dist' \
     --exclude='build' --exclude='__pycache__' --exclude='*.pyc' \
-    --exclude='*.spec' --exclude='make-image.sh' --exclude='make-usb.sh' .
+    --exclude='*.spec' --exclude='make-image.sh' --exclude='make-usb.sh' \
+    --exclude='fix-usb-on-nuc.sh' .
 ok "App: $(ls -lh "$APP_TGZ" | awk '{print $5}')"
 
-# ── Step 3: Build dentro la VM Podman (loop device disponibili!) ──────────────
-step 3 "Copia file nella VM e avvio build (~20-30 min)..."
+# ── Step 3: Copia file sul NUC ────────────────────────────────────────────────
+step 3 "Copia file sul NUC..."
+sshpass -p "$NUC_PASS" ssh "${SSH_OPTS[@]}" "$NUC_USER@$NUC_IP" \
+    "mkdir -p /tmp/cv-build /tmp/cv-output"
+
+sshpass -p "$NUC_PASS" scp "${SCP_OPTS[@]}" \
+    "$BUILD_SCRIPT"  "$NUC_USER@$NUC_IP:/tmp/cv-build/build_image_inside.sh"
+sshpass -p "$NUC_PASS" scp "${SCP_OPTS[@]}" \
+    "$APP_TGZ"       "$NUC_USER@$NUC_IP:/tmp/cv-output/camera-viewer-app.tar.gz"
+ok "File copiati sul NUC"
+
+# ── Step 4: Build immagine sul NUC ────────────────────────────────────────────
+step 4 "Build immagine sul NUC ($NUC_IP) — grub nativo, ~20 min..."
+echo ""
+echo -e "  ${C}Il NUC usa losetup e grub-mkstandalone nativi — nessun problema!${E}"
+echo "  Log in tempo reale:"
 echo ""
 
-# Ottieni SSH config dalla VM (podman machine scp non disponibile in v5.x)
-info() { echo -e "  ${C}→${E} $1"; }
-# Strip asterisk (*) dal nome VM — podman lo aggiunge alla VM attiva
-VM_NAME=$(podman machine list --format '{{.Name}}' 2>/dev/null | head -1 | tr -d '*' | tr -d ' ')
-[ -z "$VM_NAME" ] && VM_NAME="podman-machine-default"
-info "VM: $VM_NAME"
+sshpass -p "$NUC_PASS" ssh "${SSH_OPTS[@]}" "$NUC_USER@$NUC_IP" \
+    "sudo bash /tmp/cv-build/build_image_inside.sh '$VERSION' '/tmp/cv-output' '/tmp/cv-output/camera-viewer-app.tar.gz'"
 
-VM_JSON=$(podman machine inspect "$VM_NAME" 2>/dev/null) \
-    || err "Impossibile ispezionare la VM '$VM_NAME'"
-
-SSH_PORT=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['Port'])") \
-    || err "SSH port non trovata"
-SSH_KEY=$(echo "$VM_JSON"  | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['IdentityPath'])") \
-    || err "SSH key non trovata"
-SSH_USER=$(echo "$VM_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin)[0]; print(d['SSHConfig']['RemoteUsername'])") \
-    || err "SSH user non trovato"
-# ssh usa -p minuscola, scp usa -P maiuscola per la porta
-SSH_OPTS=(-i "$SSH_KEY" -p "$SSH_PORT" -o StrictHostKeyChecking=no -o LogLevel=ERROR)
-SCP_OPTS=(-i "$SSH_KEY" -P "$SSH_PORT" -o StrictHostKeyChecking=no -o LogLevel=ERROR)
-SSH_HOST="${SSH_USER}@localhost"
-
-info "SSH: ${SSH_USER}@localhost:${SSH_PORT}"
-info "Key: $SSH_KEY"
-
-# Test connessione
-ssh "${SSH_OPTS[@]}" "$SSH_HOST" "echo 'SSH OK'" || err "Connessione SSH alla VM fallita"
-ok "Connessione SSH alla VM OK"
-
-# Copia file nella VM
-info "Copia script e archivio app nella VM..."
-# Usa $HOME (non /tmp che potrebbe essere tmpfs limitato in CoreOS)
-scp "${SCP_OPTS[@]}" "$SETUP_SCRIPT" "${SSH_HOST}:build_image_inside.sh"
-scp "${SCP_OPTS[@]}" "$APP_TGZ"      "${SSH_HOST}:camera-viewer-app.tar.gz"
-ok "File copiati nella VM"
-
-info "Avvio container Ubuntu DENTRO la VM (loop device garantiti)..."
-echo ""
-
-# La VM è Fedora CoreOS — non ha apt-get.
-# Eseguiamo il container Ubuntu DENTRO la VM: lì i container hanno
-# accesso diretto ai loop device del kernel Linux reale.
-ssh "${SSH_OPTS[@]}" "$SSH_HOST" << SSHEOF
-set -e
-
-# Prepara directory
-# Usa $HOME (più spazio di /tmp nella VM Fedora CoreOS)
-CV_BUILD_DIR="\$HOME/cv-build"
-CV_OUT_DIR="\$HOME/cv-output"
-
-mkdir -p "\$CV_BUILD_DIR" "\$CV_OUT_DIR" "\$CV_OUT_DIR/apt-cache"
-cp "\$HOME/build_image_inside.sh" "\$CV_BUILD_DIR/"
-cp "\$HOME/camera-viewer-app.tar.gz" "\$CV_OUT_DIR/"
-
-echo "→ Spazio disponibile:"
-df -h "\$HOME" | tail -1
-
-echo "→ Caricamento modulo loop nella VM..."
-sudo modprobe loop max_loop=16 2>/dev/null || true
-# Crea loop device se non esistono
-for i in \$(seq 0 15); do
-    [ -b "/dev/loop\$i" ] || sudo mknod "/dev/loop\$i" b 7 "\$i" 2>/dev/null || true
-done
-ls /dev/loop0 && echo "loop devices pronti" || echo "warn: loop0 non trovato"
-
-echo "→ Avvio container Ubuntu amd64 con accesso privilegiato..."
-
-# Monta l'intero /dev dalla VM nel container: tutti i loop device disponibili
-sudo podman run --rm --privileged \
-    --platform linux/amd64 \
-    -v /dev:/dev \
-    -v "\$CV_BUILD_DIR":/setup:z \
-    -v "\$CV_OUT_DIR":/output:z \
-    -v "\$CV_OUT_DIR/apt-cache":/var/cache/apt:z \
-    ubuntu:24.04 \
-    bash /setup/build_image_inside.sh "$VERSION" "/output" "/output/camera-viewer-app.tar.gz"
-
-echo "→ Build completato!"
-ls -lh "\$CV_OUT_DIR/"
-SSHEOF
-
-# Copia immagine dalla VM al Mac
-info "Copia immagine compressa dal Mac..."
+# ── Step 5: Copia immagine sul Mac ────────────────────────────────────────────
+step 5 "Copia immagine compressa sul Mac..."
 mkdir -p "$OUTPUT_DIR"
-scp "${SCP_OPTS[@]}" "${SSH_HOST}:cv-output/camera-viewer-v${VERSION}.img.xz" "$OUTPUT_DIR/"
+sshpass -p "$NUC_PASS" scp "${SCP_OPTS[@]}" \
+    "$NUC_USER@$NUC_IP:/tmp/cv-output/camera-viewer-v${VERSION}.img.xz" \
+    "$OUTPUT_IMG"
 
-# ── Step 4: Verifica ─────────────────────────────────────────────────────────
-step 4 "Verifica output..."
-if [ -f "$OUTPUT_IMG" ]; then
-    SIZE=$(ls -lh "$OUTPUT_IMG" | awk '{print $5}')
-    ok "Immagine: dist/camera-viewer-v${VERSION}.img.xz ($SIZE)"
-else
-    err "Immagine non trovata: $OUTPUT_IMG"
-fi
-
-# ── Step 5: Pulizia ───────────────────────────────────────────────────────────
-step 5 "Pulizia file temporanei..."
+# Pulizia temporanei
 rm -f "$APP_TGZ"
-ok "Pulizia completata"
+sshpass -p "$NUC_PASS" ssh "${SSH_OPTS[@]}" "$NUC_USER@$NUC_IP" \
+    "sudo rm -rf /tmp/cv-build /tmp/cv-output" 2>/dev/null || true
+
+SIZE=$(ls -lh "$OUTPUT_IMG" | awk '{print $5}')
+ok "Immagine: dist/camera-viewer-v${VERSION}.img.xz ($SIZE)"
 
 echo ""
 echo -e "${G}${B}╔══════════════════════════════════════════════════╗${E}"
