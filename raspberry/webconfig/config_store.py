@@ -122,8 +122,10 @@ def _normalize(cfg: dict) -> dict:
             "must_change_password": True,
         }]
     # Migrate: add must_change_password to existing users that lack it
+    # Set True if field was missing (unknown if password was changed)
     for u in cfg.get("users", []):
-        u.setdefault("must_change_password", False)
+        if "must_change_password" not in u:
+            u["must_change_password"] = True   # safer default: force change
     return cfg
 
 
