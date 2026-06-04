@@ -38,5 +38,7 @@ case "$EVENT" in
             fi
         done
         rm -f /tmp/cv-ap-mode 2>/dev/null || true
+        # Chiudi overlay xterm se aperto
+        pkill -f "xterm.*Camera-Viewer-AP" 2>/dev/null || true
         ;;
 esac
