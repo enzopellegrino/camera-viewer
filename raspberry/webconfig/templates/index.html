@@ -265,6 +265,34 @@
         <button class="btn btn-primary" id="site-name-save">Salva nome</button>
       </div>
 
+      <!-- Configurazione WiFi -->
+      <div class="card">
+        <h3>📶 Connessione WiFi</h3>
+        <p class="text-muted mb-12">Connetti il dispositivo a una rete WiFi (utile senza ethernet).</p>
+        <div id="wifi-status-row" class="vpn-status-row" style="margin-bottom:14px">
+          <div class="status-indicator" id="wifi-indicator">📶</div>
+          <div style="flex:1">
+            <div class="label-bold" id="wifi-status-text">Verifica in corso…</div>
+            <div class="label-muted" id="wifi-status-sub"></div>
+          </div>
+        </div>
+        <button class="btn" id="wifi-scan-btn">🔍 Cerca reti WiFi</button>
+        <div id="wifi-networks" style="margin-top:12px;display:none">
+          <label>Reti disponibili</label>
+          <div id="wifi-list" class="cam-list" style="max-height:200px;overflow-y:auto"></div>
+        </div>
+        <div id="wifi-connect-form" class="hidden" style="margin-top:14px">
+          <div class="field">
+            <label id="wifi-ssid-label">SSID selezionato</label>
+            <input id="wifi-password" type="password" placeholder="Password WiFi"/>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" id="wifi-connect-btn">Connetti</button>
+            <button class="btn" id="wifi-cancel-btn">Annulla</button>
+          </div>
+        </div>
+      </div>
+
       <!-- Controllo viewer -->
       <div class="card">
         <h3>Controllo viewer</h3>

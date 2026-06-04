@@ -759,6 +759,73 @@ $('#own-password-save')?.addEventListener('click', async () => {
   if (ok) $('#own-password').value = '';
 });
 
+// ── WiFi ─────────────────────────────────────────────────────────────────
+let _selectedSsid = '';
+
+async function loadWifiStatus() {
+  const { data } = await api('/api/status');
+  const ind = $('#wifi-indicator'), txt = $('#wifi-status-text'), sub = $('#wifi-status-sub');
+  if (data.type === 'wifi') {
+    ind.className = 'status-indicator active'; ind.textContent = '📶';
+    txt.textContent = `Connesso: ${data.ssid || 'WiFi'}`;
+    sub.textContent = data.ip || '';
+  } else if (data.type === 'ethernet') {
+    ind.className = 'status-indicator'; ind.textContent = '🔌';
+    txt.textContent = 'Ethernet connessa';
+    sub.textContent = data.ip || '';
+  } else {
+    ind.className = 'status-indicator'; ind.textContent = '📶';
+    txt.textContent = 'Non connesso';
+    sub.textContent = '';
+  }
+}
+
+$('#wifi-scan-btn')?.addEventListener('click', async () => {
+  const btn = $('#wifi-scan-btn');
+  btn.disabled = true; btn.textContent = '🔍 Ricerca in corso…';
+  const { ok, data } = await api('/api/wifi/scan');
+  btn.disabled = false; btn.textContent = '🔍 Cerca reti WiFi';
+  if (!ok || !data.networks?.length) { toast('Nessuna rete trovata', 'err'); return; }
+  const list = $('#wifi-list');
+  list.innerHTML = data.networks.map(n => `
+    <div class="cam-card" style="cursor:pointer" onclick="selectWifi('${esc(n.ssid)}')">
+      <div class="cam-card-info">
+        <div class="cam-card-name">${esc(n.ssid)}</div>
+        <div class="cam-card-url">${n.security !== 'open' ? '🔒 ' : '🔓 '}${n.signal}% — ${n.security}</div>
+      </div>
+    </div>`).join('');
+  $('#wifi-networks').style.display = 'block';
+});
+
+window.selectWifi = ssid => {
+  _selectedSsid = ssid;
+  $('#wifi-ssid-label').textContent = `Password per "${ssid}"`;
+  $('#wifi-password').value = '';
+  $('#wifi-connect-form').classList.remove('hidden');
+  $('#wifi-password').focus();
+};
+
+$('#wifi-connect-btn')?.addEventListener('click', async () => {
+  const btn = $('#wifi-connect-btn');
+  btn.disabled = true; btn.textContent = 'Connessione…';
+  const { ok, data } = await api('/api/wifi/connect', {
+    method: 'POST',
+    body: JSON.stringify({ ssid: _selectedSsid, password: $('#wifi-password').value })
+  });
+  toast(data.message || (ok ? `Connesso a ${_selectedSsid}` : 'Errore'), ok ? 'ok' : 'err');
+  btn.disabled = false; btn.textContent = 'Connetti';
+  if (ok) {
+    $('#wifi-connect-form').classList.add('hidden');
+    $('#wifi-networks').style.display = 'none';
+    setTimeout(loadWifiStatus, 3000);
+  }
+});
+
+$('#wifi-cancel-btn')?.addEventListener('click', () => {
+  $('#wifi-connect-form').classList.add('hidden');
+  _selectedSsid = '';
+});
+
 // ── Apply / Setup mode ────────────────────────────────────────────────────
 $('#apply-btn')?.addEventListener('click', async () => {
   const { ok, data } = await api('/api/apply', { method: 'POST' });
@@ -793,4 +860,5 @@ $('#apply-btn')?.addEventListener('click', async () => {
 
   // Poll status every 30s
   setInterval(loadStatus, 30000);
+  loadWifiStatus();
 })();
