@@ -235,19 +235,24 @@ def get_ip_config() -> dict:
     return result
 
 
+def _run_sudo(args: list[str], timeout: int = 30) -> tuple[int, str, str]:
+    """Esegue un comando nmcli con sudo (richiede NOPASSWD in sudoers)."""
+    return _run(["sudo", "-n"] + args, timeout=timeout)
+
+
 def set_ip_config(iface_type: str, method: str,
                   address: str = "", gateway: str = "", dns: str = "8.8.8.8") -> tuple[bool, str]:
-    """Applica configurazione IP (DHCP o statico) tramite nmcli."""
+    """Applica configurazione IP (DHCP o statico) tramite nmcli con sudo."""
     if not _has_nmcli():
         return False, "nmcli non disponibile"
 
     con = _find_connection(iface_type)
     if not con:
-        # Crea connessione di base se non esiste
         dev_type = "ethernet" if iface_type == "ethernet" else "wifi"
-        rc, _, err = _run(["nmcli", "con", "add", "type", dev_type,
-                           "con-name", iface_type.capitalize(),
-                           "ifname", "eno1" if iface_type == "ethernet" else "wlp1s0"])
+        iface   = "eno1" if iface_type == "ethernet" else "wlp1s0"
+        rc, _, err = _run_sudo(["nmcli", "con", "add", "type", dev_type,
+                                "con-name", iface_type.capitalize(),
+                                "ifname", iface])
         if rc != 0:
             return False, f"Connessione non trovata: {err}"
         con = iface_type.capitalize()
@@ -267,12 +272,11 @@ def set_ip_config(iface_type: str, method: str,
                 "ipv4.gateway", gateway or "",
                 "ipv4.dns", dns or "8.8.8.8"]
 
-    rc, _, err = _run(args)
+    rc, _, err = _run_sudo(args)
     if rc != 0:
         return False, f"Errore configurazione: {err}"
 
-    # Riattiva la connessione
-    rc2, _, err2 = _run(["nmcli", "con", "up", con], timeout=30)
+    rc2, _, err2 = _run_sudo(["nmcli", "con", "up", con])
     if rc2 != 0:
         return False, f"Configurazione salvata ma errore riattivazione: {err2}"
 
