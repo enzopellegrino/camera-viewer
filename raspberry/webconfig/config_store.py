@@ -119,7 +119,11 @@ def _normalize(cfg: dict) -> dict:
             "username": "admin",
             "password_hash": generate_password_hash("admin"),
             "role": "admin",
+            "must_change_password": True,
         }]
+    # Migrate: add must_change_password to existing users that lack it
+    for u in cfg.get("users", []):
+        u.setdefault("must_change_password", False)
     return cfg
 
 
@@ -349,6 +353,7 @@ def update_user_password(user_id: str, password_hash: str) -> bool:
         for u in cfg.get("users", []):
             if u["id"] == user_id:
                 u["password_hash"] = password_hash
+                u["must_change_password"] = False   # reset flag after change
                 return True
         return False
 

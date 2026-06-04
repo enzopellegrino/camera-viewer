@@ -11,7 +11,9 @@ set -euo pipefail
 
 LOG="/tmp/cv-network.log"
 AP_SSID="Camera-Viewer"
-AP_PASS="cameraviewer"   # Password hotspot (min 8 caratteri, WPA2)
+# Password hotspot casuale per sessione (mostrata SOLO sullo schermo fisico)
+# Cambia ad ogni attivazione — solo chi è fisicamente presente può vederla
+AP_PASS="cv-$(cat /proc/sys/kernel/random/uuid 2>/dev/null | cut -c1-6 || echo 'setup1')"
 AP_IP="10.42.0.1"
 WAIT_SECONDS=30
 

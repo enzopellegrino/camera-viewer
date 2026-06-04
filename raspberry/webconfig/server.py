@@ -114,10 +114,13 @@ def api_auth_logout():
 def api_auth_me():
     if "user_id" not in session:
         return jsonify({"ok": False, "authenticated": False}), 401
+    user = store.get_user_by_id(session["user_id"])
+    must_change = (user or {}).get("must_change_password", False)
     return jsonify({
         "ok": True, "authenticated": True,
         "username": session["username"],
         "role":     session["role"],
+        "must_change_password": must_change,
     })
 
 

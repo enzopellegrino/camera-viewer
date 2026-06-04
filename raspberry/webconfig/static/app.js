@@ -898,6 +898,33 @@ $('#apply-btn')?.addEventListener('click', async () => {
   const ok = await initAuth();
   if (!ok) return;
 
+  // Cambio password obbligatorio se flag attivo
+  if (_currentUser.must_change_password) {
+    const modal = $('#must-change-modal');
+    modal.style.display = 'flex';
+
+    $('#must-change-save').addEventListener('click', async () => {
+      const pw1 = $('#must-change-pw1').value;
+      const pw2 = $('#must-change-pw2').value;
+      const err = $('#must-change-error');
+      if (pw1.length < 6) { err.textContent = 'Password troppo corta (min 6 caratteri)'; err.style.display='block'; return; }
+      if (pw1 !== pw2) { err.textContent = 'Le password non coincidono'; err.style.display='block'; return; }
+      err.style.display = 'none';
+      const { ok, data } = await api(`/api/users/${_currentUser.id}/password`, {
+        method: 'PUT', body: JSON.stringify({ password: pw1 })
+      });
+      if (ok) {
+        modal.style.display = 'none';
+        toast('Password aggiornata ✅', 'ok');
+      } else {
+        err.textContent = data.message || 'Errore'; err.style.display = 'block';
+      }
+    });
+
+    // Non permettere di chiudere il modal con click esterno
+    modal.addEventListener('click', e => { if (e.target === modal) e.stopPropagation(); });
+  }
+
   // Ripristina il tab salvato al refresh (prima di caricare i dati)
   try {
     const saved = localStorage.getItem('cv-tab');
