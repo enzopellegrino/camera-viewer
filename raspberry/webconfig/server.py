@@ -118,6 +118,7 @@ def api_auth_me():
     must_change = (user or {}).get("must_change_password", False)
     return jsonify({
         "ok": True, "authenticated": True,
+        "id":       session["user_id"],
         "username": session["username"],
         "role":     session["role"],
         "must_change_password": must_change,
