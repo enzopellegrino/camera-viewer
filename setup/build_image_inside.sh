@@ -132,8 +132,11 @@ echo "deb http://archive.ubuntu.com/ubuntu noble-updates main universe" >> /etc/
 echo "deb http://security.ubuntu.com/ubuntu noble-security main universe" >> /etc/apt/sources.list
 apt-get update -q
 
-# Kernel e bootloader
-apt-get install -y -q --no-install-recommends linux-image-generic shim-signed grub-efi-amd64-signed
+# Kernel, initramfs-tools (indispensabile per generare initrd) e bootloader
+apt-get install -y -q --no-install-recommends linux-image-generic initramfs-tools shim-signed grub-efi-amd64-signed
+# Forza generazione initrd (a volte non parte automaticamente nel chroot)
+KERNEL_VER=$(ls /boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/boot/vmlinuz-||')
+[ -n "$KERNEL_VER" ] && update-initramfs -c -k "$KERNEL_VER" 2>&1 | tail -3 || true
 apt-get clean
 
 # Sistema base
