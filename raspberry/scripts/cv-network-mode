@@ -47,6 +47,24 @@ fi
 WIFI_IF=$(nmcli -t -f DEVICE,TYPE dev 2>/dev/null | grep ":wifi$" | cut -d: -f1 | head -1)
 log "Interfaccia WiFi: $WIFI_IF"
 
+# ── PRIMA: prova WiFi già configurato ────────────────────────────────────
+# Se c'è una connessione WiFi salvata, usa quella invece dell'hotspot
+SAVED_WIFI=$(nmcli -t -f NAME,TYPE con show 2>/dev/null | \
+    grep ":wifi$" | grep -iv "Camera-Viewer\|Hotspot" | cut -d: -f1 | head -1)
+
+if [ -n "$SAVED_WIFI" ]; then
+    log "WiFi configurato trovato: '$SAVED_WIFI' — connessione in corso..."
+    nmcli con up "$SAVED_WIFI" 2>/dev/null
+    sleep 6
+    if nmcli -t -f TYPE,STATE dev 2>/dev/null | grep -q "wifi:connected"; then
+        IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+        log "Connesso a WiFi '$SAVED_WIFI' — IP: $IP — portale: http://$IP"
+        exit 0
+    fi
+    log "WiFi '$SAVED_WIFI' non raggiungibile — avvio hotspot..."
+fi
+
+# ── FALLBACK: nessun WiFi configurato/raggiungibile → crea hotspot ───────
 # Rimuovi hotspot precedente se esiste
 nmcli con delete "Camera-Viewer-AP" 2>/dev/null || true
 
