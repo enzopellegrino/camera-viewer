@@ -235,6 +235,24 @@ def get_ip_config() -> dict:
     return result
 
 
+def reset_wifi() -> tuple[bool, str]:
+    """Rimuove tutte le connessioni WiFi salvate (non hotspot/AP)."""
+    if not _has_nmcli():
+        return False, "nmcli non disponibile"
+    rc, out, _ = _run(["nmcli", "-t", "-f", "NAME,TYPE", "con", "show"])
+    removed = []
+    for line in out.splitlines():
+        parts = line.split(":")
+        if len(parts) >= 2 and "wifi" in parts[1].lower():
+            name = parts[0]
+            if not any(x in name.lower() for x in ["hotspot", "camera-viewer"]):
+                _run_sudo(["nmcli", "con", "delete", name])
+                removed.append(name)
+    if removed:
+        return True, f"WiFi dimenticato: {', '.join(removed)}"
+    return True, "Nessuna rete WiFi salvata"
+
+
 def _run_sudo(args: list[str], timeout: int = 30) -> tuple[int, str, str]:
     """Esegue un comando nmcli con sudo (richiede NOPASSWD in sudoers)."""
     return _run(["sudo", "-n"] + args, timeout=timeout)

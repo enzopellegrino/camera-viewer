@@ -309,6 +309,14 @@ def api_wifi_scan():
     return jsonify({"networks": network.scan_wifi()})
 
 
+@app.route("/api/wifi/reset", methods=["POST"])
+@login_required(admin=True)
+def api_wifi_reset():
+    """Rimuove tutte le reti WiFi salvate — il dispositivo tornerà all'hotspot se non c'è ethernet."""
+    ok, msg = network.reset_wifi()
+    return jsonify({"ok": ok, "message": msg})
+
+
 @app.route("/api/wifi/connect", methods=["POST"])
 @login_required(admin=True)
 def api_wifi_connect():

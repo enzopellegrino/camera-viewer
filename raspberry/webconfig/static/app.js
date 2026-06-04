@@ -882,6 +882,13 @@ $('#wifi-connect-btn')?.addEventListener('click', async () => {
   }
 });
 
+$('#wifi-reset-btn')?.addEventListener('click', async () => {
+  if (!confirm('Rimuovere la rete WiFi salvata?\nAl prossimo distacco della LAN si attiverà l\'hotspot.')) return;
+  const { ok, data } = await api('/api/wifi/reset', { method: 'POST' });
+  toast(data.message || (ok ? 'WiFi rimosso' : 'Errore'), ok ? 'ok' : 'err');
+  if (ok) { $('#wifi-status-text').textContent = 'Non connesso'; loadWifiStatus(); }
+});
+
 $('#wifi-cancel-btn')?.addEventListener('click', () => {
   $('#wifi-connect-form').classList.add('hidden');
   _selectedSsid = '';

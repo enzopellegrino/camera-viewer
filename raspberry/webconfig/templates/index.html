@@ -229,9 +229,48 @@
     <section id="tab-settings" class="panel">
       <div class="panel-head"><h2>Impostazioni</h2></div>
 
-      <!-- Viewer settings (admin) -->
+      <!-- ══ DISPOSITIVO ══ -->
+      <p class="text-muted" style="font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px">📱 Dispositivo</p>
+
       <div class="card admin-only">
-        <h3>Viewer</h3>
+        <h3>Nome dispositivo</h3>
+        <div class="field">
+          <label>Titolo visualizzato nel portale</label>
+          <input id="site-name-input" placeholder="Camera Viewer"/>
+        </div>
+        <button class="btn btn-primary" id="site-name-save">Salva nome</button>
+      </div>
+
+      <div class="card admin-only">
+        <h3>Logo e sfondo</h3>
+        <p class="text-muted mb-12" style="font-size:.82rem">Logo mostrato nei riquadri senza stream attivo.</p>
+        <div id="placeholder-preview-box" hidden><img id="placeholder-preview" src="" alt="" class="img-preview"/></div>
+        <label class="file-drop">
+          <span id="placeholder-label">📂 Logo offline (JPG, PNG, WEBP)</span>
+          <input id="placeholder-file" type="file" accept="image/*" hidden/>
+        </label>
+        <div class="form-actions" style="margin-bottom:14px">
+          <button class="btn btn-primary" id="placeholder-apply" disabled>Applica logo</button>
+          <button class="btn" id="placeholder-reset">Rimuovi</button>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border);margin:0 0 14px"/>
+        <p class="text-muted mb-12" style="font-size:.82rem">Sfondo desktop del sistema.</p>
+        <div id="wallpaper-preview-box" hidden><img id="wallpaper-preview" src="" alt="" class="img-preview"/></div>
+        <label class="file-drop">
+          <span id="wallpaper-label">📂 Sfondo desktop (JPG, PNG, WEBP)</span>
+          <input id="wallpaper-file" type="file" accept="image/*" hidden/>
+        </label>
+        <div class="form-actions">
+          <button class="btn btn-primary" id="wallpaper-apply" disabled>Applica sfondo</button>
+          <button class="btn" id="wallpaper-reset">Ripristina</button>
+        </div>
+      </div>
+
+      <!-- ══ VIEWER ══ -->
+      <p class="text-muted" style="font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;margin:20px 0 10px">🎥 Viewer</p>
+
+      <div class="card admin-only">
+        <h3>Impostazioni viewer</h3>
         <div class="fields-row">
           <div class="field flex1">
             <label>Griglia default</label>
@@ -255,15 +294,8 @@
         <button class="btn btn-primary" id="set-save">Salva impostazioni</button>
       </div>
 
-      <!-- Nome sito (admin) -->
-      <div class="card admin-only">
-        <h3>Nome dispositivo</h3>
-        <div class="field">
-          <label>Titolo visualizzato nel portale</label>
-          <input id="site-name-input" placeholder="Camera Viewer"/>
-        </div>
-        <button class="btn btn-primary" id="site-name-save">Salva nome</button>
-      </div>
+      <!-- ══ RETE ══ -->
+      <p class="text-muted" style="font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;margin:20px 0 10px">🌐 Rete</p>
 
       <!-- Configurazione IP rete -->
       <div class="card admin-only">
@@ -303,10 +335,8 @@
         <button class="btn btn-primary btn-sm" id="wifi-ip-save-btn">Applica WiFi</button>
       </div>
 
-      <!-- Connessione WiFi -->
       <div class="card">
         <h3>📶 Connessione WiFi</h3>
-        <p class="text-muted mb-12">Connetti il dispositivo a una rete WiFi (utile senza ethernet).</p>
         <div id="wifi-status-row" class="vpn-status-row" style="margin-bottom:14px">
           <div class="status-indicator" id="wifi-indicator">📶</div>
           <div style="flex:1">
@@ -314,7 +344,12 @@
             <div class="label-muted" id="wifi-status-sub"></div>
           </div>
         </div>
-        <button class="btn" id="wifi-scan-btn">🔍 Cerca reti WiFi</button>
+        <div class="form-actions" style="margin-bottom:12px;flex-wrap:wrap">
+          <button class="btn" id="wifi-scan-btn">🔍 Cerca reti</button>
+          <button class="btn btn-danger admin-only" id="wifi-reset-btn">🗑 Dimentica WiFi</button>
+        </div>
+        <div id="wifi-scan-placeholder" style="display:none"><!--unused--></div>
+        <button class="btn hidden" id="wifi-scan-btn-hidden">🔍 Cerca reti WiFi</button>
         <div id="wifi-networks" style="margin-top:12px;display:none">
           <label>Reti disponibili</label>
           <div id="wifi-list" class="cam-list" style="max-height:200px;overflow-y:auto"></div>
@@ -331,51 +366,19 @@
         </div>
       </div>
 
-      <!-- Controllo viewer -->
+      <!-- ══ SISTEMA ══ -->
+      <p class="text-muted" style="font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;margin:20px 0 10px">⚙️ Sistema</p>
+
       <div class="card">
         <h3>Controllo viewer</h3>
         <p class="text-muted mb-12">Riavvia l'app sulla TV senza riavviare il dispositivo.</p>
         <button class="btn" id="restart-viewer-btn">🔄 Riavvia viewer</button>
       </div>
 
-      <!-- Logo telecamera -->
       <div class="card admin-only">
-        <h3>Logo telecamera offline</h3>
-        <p class="text-muted mb-12">Mostrato nei riquadri senza stream attivo.</p>
-        <div id="placeholder-preview-box" hidden>
-          <img id="placeholder-preview" src="" alt="" class="img-preview"/>
-        </div>
-        <label class="file-drop">
-          <span id="placeholder-label">📂 Scegli un'immagine (JPG, PNG, WEBP)</span>
-          <input id="placeholder-file" type="file" accept="image/*" hidden/>
-        </label>
-        <div class="form-actions">
-          <button class="btn btn-primary" id="placeholder-apply" disabled>Applica logo</button>
-          <button class="btn" id="placeholder-reset">Rimuovi</button>
-        </div>
-      </div>
-
-      <!-- Sfondo desktop -->
-      <div class="card admin-only">
-        <h3>Sfondo desktop</h3>
-        <div id="wallpaper-preview-box" hidden>
-          <img id="wallpaper-preview" src="" alt="" class="img-preview"/>
-        </div>
-        <label class="file-drop">
-          <span id="wallpaper-label">📂 Scegli un'immagine (JPG, PNG, WEBP)</span>
-          <input id="wallpaper-file" type="file" accept="image/*" hidden/>
-        </label>
-        <div class="form-actions">
-          <button class="btn btn-primary" id="wallpaper-apply" disabled>Applica sfondo</button>
-          <button class="btn" id="wallpaper-reset">Ripristina</button>
-        </div>
-      </div>
-
-      <!-- Primo avvio -->
-      <div class="card admin-only">
-        <h3>Primo avvio</h3>
-        <p class="text-muted mb-12">Riavvia il dispositivo in modalità configurazione.</p>
-        <button class="btn btn-danger" id="apply-btn">Riavvia dispositivo e avvia viewer</button>
+        <h3>Manutenzione</h3>
+        <p class="text-muted mb-12">Riavvia il dispositivo in modalità configurazione iniziale.</p>
+        <button class="btn btn-danger" id="apply-btn">↺ Riavvia in modalità configurazione</button>
       </div>
 
       <!-- About -->
