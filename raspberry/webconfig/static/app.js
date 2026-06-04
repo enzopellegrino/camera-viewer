@@ -759,6 +759,67 @@ $('#own-password-save')?.addEventListener('click', async () => {
   if (ok) $('#own-password').value = '';
 });
 
+// ── Configurazione IP rete ────────────────────────────────────────────────
+const _netMethod = { eth: 'auto', wifi: 'auto' };
+
+window.setNetMethod = (type, val, btn) => {
+  _netMethod[type] = val;
+  const seg = type === 'eth' ? '#eth-method-seg' : '#wifi-method-seg';
+  $$(seg + ' .seg-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  const fields = type === 'eth' ? '#eth-static-fields' : '#wifi-static-fields';
+  $(fields).classList.toggle('hidden', val === 'auto');
+};
+
+async function loadNetworkConfig() {
+  const { ok, data } = await api('/api/network/config');
+  if (!ok) return;
+  // Ethernet
+  if (data.ethernet) {
+    const m = data.ethernet.method === 'manual' ? 'manual' : 'auto';
+    _netMethod.eth = m;
+    $$('#eth-method-seg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.val === m));
+    $('#eth-static-fields').classList.toggle('hidden', m === 'auto');
+    if (data.ethernet.address) $('#eth-address').value = data.ethernet.address;
+    if (data.ethernet.gateway) $('#eth-gateway').value = data.ethernet.gateway;
+    if (data.ethernet.dns) $('#eth-dns').value = data.ethernet.dns;
+  }
+  // WiFi
+  if (data.wifi) {
+    const m = data.wifi.method === 'manual' ? 'manual' : 'auto';
+    _netMethod.wifi = m;
+    $$('#wifi-method-seg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.val === m));
+    $('#wifi-static-fields').classList.toggle('hidden', m === 'auto');
+    if (data.wifi.address) $('#wifi-ip-address').value = data.wifi.address;
+    if (data.wifi.gateway) $('#wifi-ip-gateway').value = data.wifi.gateway;
+    if (data.wifi.dns) $('#wifi-ip-dns').value = data.wifi.dns;
+  }
+}
+
+$('#eth-save-btn')?.addEventListener('click', async () => {
+  const btn = $('#eth-save-btn'); btn.disabled = true; btn.textContent = 'Applicazione…';
+  const body = {
+    type: 'ethernet', method: _netMethod.eth,
+    address: $('#eth-address').value, gateway: $('#eth-gateway').value, dns: $('#eth-dns').value
+  };
+  const { ok, data } = await api('/api/network/config', { method: 'POST', body: JSON.stringify(body) });
+  toast(data.message || (ok ? 'Ethernet configurata' : 'Errore'), ok ? 'ok' : 'err');
+  btn.disabled = false; btn.textContent = 'Applica ethernet';
+  if (ok) setTimeout(loadStatus, 3000);
+});
+
+$('#wifi-ip-save-btn')?.addEventListener('click', async () => {
+  const btn = $('#wifi-ip-save-btn'); btn.disabled = true; btn.textContent = 'Applicazione…';
+  const body = {
+    type: 'wifi', method: _netMethod.wifi,
+    address: $('#wifi-ip-address').value, gateway: $('#wifi-ip-gateway').value, dns: $('#wifi-ip-dns').value
+  };
+  const { ok, data } = await api('/api/network/config', { method: 'POST', body: JSON.stringify(body) });
+  toast(data.message || (ok ? 'WiFi IP configurato' : 'Errore'), ok ? 'ok' : 'err');
+  btn.disabled = false; btn.textContent = 'Applica WiFi';
+  if (ok) setTimeout(loadStatus, 3000);
+});
+
 // ── WiFi ─────────────────────────────────────────────────────────────────
 let _selectedSsid = '';
 
@@ -861,4 +922,5 @@ $('#apply-btn')?.addEventListener('click', async () => {
   // Poll status every 30s
   setInterval(loadStatus, 30000);
   loadWifiStatus();
+  loadNetworkConfig();
 })();

@@ -265,7 +265,45 @@
         <button class="btn btn-primary" id="site-name-save">Salva nome</button>
       </div>
 
-      <!-- Configurazione WiFi -->
+      <!-- Configurazione IP rete -->
+      <div class="card admin-only">
+        <h3>🌐 Impostazioni di rete</h3>
+        <p class="text-muted mb-12">Configura DHCP o IP fisso per ethernet e WiFi.</p>
+
+        <!-- Ethernet -->
+        <label style="font-size:.9rem;font-weight:700;margin-bottom:8px;display:block">🔌 Ethernet</label>
+        <div class="seg-ctrl" id="eth-method-seg" style="margin-bottom:10px">
+          <button class="seg-btn active" data-val="auto" onclick="setNetMethod('eth','auto',this)">DHCP automatico</button>
+          <button class="seg-btn" data-val="manual" onclick="setNetMethod('eth','manual',this)">IP fisso</button>
+        </div>
+        <div id="eth-static-fields" class="hidden">
+          <div class="fields-row">
+            <div class="field flex1"><label>Indirizzo IP / CIDR</label><input id="eth-address" placeholder="es. 192.168.1.100/24"/></div>
+            <div class="field flex1"><label>Gateway</label><input id="eth-gateway" placeholder="es. 192.168.1.1"/></div>
+          </div>
+          <div class="field"><label>DNS</label><input id="eth-dns" placeholder="8.8.8.8" value="8.8.8.8"/></div>
+        </div>
+        <button class="btn btn-primary btn-sm" id="eth-save-btn" style="margin-bottom:18px">Applica ethernet</button>
+
+        <hr style="border:none;border-top:1px solid var(--border);margin:4px 0 14px"/>
+
+        <!-- WiFi -->
+        <label style="font-size:.9rem;font-weight:700;margin-bottom:8px;display:block">📶 WiFi</label>
+        <div class="seg-ctrl" id="wifi-method-seg" style="margin-bottom:10px">
+          <button class="seg-btn active" data-val="auto" onclick="setNetMethod('wifi','auto',this)">DHCP automatico</button>
+          <button class="seg-btn" data-val="manual" onclick="setNetMethod('wifi','manual',this)">IP fisso</button>
+        </div>
+        <div id="wifi-static-fields" class="hidden">
+          <div class="fields-row">
+            <div class="field flex1"><label>Indirizzo IP / CIDR</label><input id="wifi-ip-address" placeholder="es. 192.168.1.101/24"/></div>
+            <div class="field flex1"><label>Gateway</label><input id="wifi-ip-gateway" placeholder="es. 192.168.1.1"/></div>
+          </div>
+          <div class="field"><label>DNS</label><input id="wifi-ip-dns" placeholder="8.8.8.8" value="8.8.8.8"/></div>
+        </div>
+        <button class="btn btn-primary btn-sm" id="wifi-ip-save-btn">Applica WiFi</button>
+      </div>
+
+      <!-- Connessione WiFi -->
       <div class="card">
         <h3>📶 Connessione WiFi</h3>
         <p class="text-muted mb-12">Connetti il dispositivo a una rete WiFi (utile senza ethernet).</p>

@@ -269,6 +269,37 @@ def api_status():
     return jsonify(network.current_status())
 
 
+# ── API: Configurazione rete (DHCP / IP fisso) ────────────────────────────────
+
+@app.route("/api/network/config", methods=["GET"])
+@login_required()
+def api_network_config_get():
+    """Restituisce la configurazione IP corrente per ethernet e WiFi."""
+    return jsonify(network.get_ip_config())
+
+
+@app.route("/api/network/config", methods=["POST"])
+@login_required(admin=True)
+def api_network_config_set():
+    """Applica configurazione IP (DHCP o statico) a ethernet o WiFi."""
+    data = request.get_json(force=True, silent=True) or {}
+    iface_type = data.get("type", "ethernet")   # "ethernet" o "wifi"
+    method     = data.get("method", "auto")       # "auto" o "manual"
+    address    = (data.get("address") or "").strip()   # es. "192.168.1.100/24"
+    gateway    = (data.get("gateway") or "").strip()
+    dns        = (data.get("dns") or "8.8.8.8").strip()
+
+    if method == "manual" and not address:
+        return jsonify({"ok": False, "message": "Indirizzo IP obbligatorio per IP fisso"}), 400
+
+    # Aggiungi /24 se mancante
+    if method == "manual" and "/" not in address:
+        address += "/24"
+
+    ok, msg = network.set_ip_config(iface_type, method, address, gateway, dns)
+    return jsonify({"ok": ok, "message": msg})
+
+
 @app.route("/api/wifi/scan")
 @login_required()
 def api_wifi_scan():

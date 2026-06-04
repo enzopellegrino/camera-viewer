@@ -171,3 +171,110 @@ def _split_nmcli(line: str) -> list[str]:
         i += 1
     fields.append("".join(buf))
     return fields
+
+
+# ── IP Configuration (DHCP / Static) ─────────────────────────────────────────
+
+def _find_connection(iface_type: str) -> str | None:
+    """Trova il nome della connessione NM per ethernet o wifi."""
+    target = "ethernet" if iface_type == "ethernet" else "wifi"
+    rc, out, _ = _run(["nmcli", "-t", "-f", "NAME,TYPE,DEVICE", "con", "show", "--active"])
+    if rc != 0:
+        return None
+    for line in out.splitlines():
+        parts = line.split(":")
+        if len(parts) >= 2 and target in parts[1].lower():
+            return parts[0]
+    # Cerca anche connessioni non attive
+    rc, out, _ = _run(["nmcli", "-t", "-f", "NAME,TYPE", "con", "show"])
+    if rc == 0:
+        for line in out.splitlines():
+            parts = line.split(":")
+            if len(parts) >= 2 and target in parts[1].lower():
+                return parts[0]
+    return None
+
+
+def get_ip_config() -> dict:
+    """Restituisce la configurazione IP corrente per ethernet e WiFi."""
+    result = {
+        "ethernet": {"method": "auto", "address": "", "gateway": "", "dns": ""},
+        "wifi":     {"method": "auto", "address": "", "gateway": "", "dns": "", "ssid": ""},
+    }
+    if not _has_nmcli():
+        return result
+
+    for iface_type in ("ethernet", "wifi"):
+        con = _find_connection(iface_type)
+        if not con:
+            continue
+        rc, out, _ = _run(["nmcli", "-t", "-f",
+                            "ipv4.method,ipv4.addresses,ipv4.gateway,ipv4.dns,connection.id",
+                            "con", "show", con])
+        if rc != 0:
+            continue
+        cfg = {}
+        for line in out.splitlines():
+            if ":" in line:
+                k, _, v = line.partition(":")
+                cfg[k.strip()] = v.strip()
+
+        result[iface_type]["method"]  = "manual" if cfg.get("ipv4.method") == "manual" else "auto"
+        result[iface_type]["address"] = cfg.get("ipv4.addresses", "")
+        result[iface_type]["gateway"] = cfg.get("ipv4.gateway", "")
+        result[iface_type]["dns"]     = cfg.get("ipv4.dns", "")
+
+        if iface_type == "wifi":
+            # SSID dalla connessione attiva
+            rc2, out2, _ = _run(["nmcli", "-t", "-f", "GENERAL.CONNECTION", "dev", "show", "wlp1s0"])
+            if rc2 == 0:
+                for line in out2.splitlines():
+                    if "GENERAL.CONNECTION" in line:
+                        result["wifi"]["ssid"] = line.split(":", 1)[-1].strip()
+
+    return result
+
+
+def set_ip_config(iface_type: str, method: str,
+                  address: str = "", gateway: str = "", dns: str = "8.8.8.8") -> tuple[bool, str]:
+    """Applica configurazione IP (DHCP o statico) tramite nmcli."""
+    if not _has_nmcli():
+        return False, "nmcli non disponibile"
+
+    con = _find_connection(iface_type)
+    if not con:
+        # Crea connessione di base se non esiste
+        dev_type = "ethernet" if iface_type == "ethernet" else "wifi"
+        rc, _, err = _run(["nmcli", "con", "add", "type", dev_type,
+                           "con-name", iface_type.capitalize(),
+                           "ifname", "eno1" if iface_type == "ethernet" else "wlp1s0"])
+        if rc != 0:
+            return False, f"Connessione non trovata: {err}"
+        con = iface_type.capitalize()
+
+    if method == "auto":
+        args = ["nmcli", "con", "mod", con,
+                "ipv4.method", "auto",
+                "ipv4.addresses", "",
+                "ipv4.gateway", "",
+                "ipv4.dns", ""]
+    else:
+        if not address:
+            return False, "Indirizzo IP obbligatorio"
+        args = ["nmcli", "con", "mod", con,
+                "ipv4.method", "manual",
+                "ipv4.addresses", address,
+                "ipv4.gateway", gateway or "",
+                "ipv4.dns", dns or "8.8.8.8"]
+
+    rc, _, err = _run(args)
+    if rc != 0:
+        return False, f"Errore configurazione: {err}"
+
+    # Riattiva la connessione
+    rc2, _, err2 = _run(["nmcli", "con", "up", con], timeout=30)
+    if rc2 != 0:
+        return False, f"Configurazione salvata ma errore riattivazione: {err2}"
+
+    label = "DHCP automatico" if method == "auto" else f"IP fisso {address}"
+    return True, f"{iface_type.capitalize()} configurato: {label}"
