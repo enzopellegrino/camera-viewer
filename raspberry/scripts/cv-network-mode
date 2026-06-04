@@ -11,6 +11,7 @@ set -euo pipefail
 
 LOG="/tmp/cv-network.log"
 AP_SSID="Camera-Viewer"
+AP_PASS="cameraviewer"   # Password hotspot (min 8 caratteri, WPA2)
 AP_IP="10.42.0.1"
 WAIT_SECONDS=30
 
@@ -52,17 +53,19 @@ nmcli con delete "Camera-Viewer-AP" 2>/dev/null || true
 log "Avvio hotspot WiFi '$AP_SSID'..."
 
 # Crea hotspot aperto (nessuna password — il portale gestisce l'auth)
+# Crea hotspot WPA2 con password (richiesto da Intel iwlwifi — no open AP)
+nmcli dev wifi hotspot \
+    ifname "$WIFI_IF" \
+    ssid "$AP_SSID" \
+    password "$AP_PASS" 2>/dev/null || \
 nmcli con add type wifi ifname "$WIFI_IF" \
     con-name "Camera-Viewer-AP" \
     ssid "$AP_SSID" \
     mode ap \
     ipv4.method shared \
     ipv4.addresses "${AP_IP}/24" \
-    wifi-sec.key-mgmt none 2>/dev/null || \
-# Fallback: usa nmcli hotspot (funziona su alcune versioni)
-nmcli dev wifi hotspot \
-    ifname "$WIFI_IF" \
-    ssid "$AP_SSID" 2>/dev/null
+    wifi-sec.key-mgmt wpa-psk \
+    wifi-sec.psk "$AP_PASS" 2>/dev/null
 
 nmcli con up "Camera-Viewer-AP" 2>/dev/null || true
 sleep 3

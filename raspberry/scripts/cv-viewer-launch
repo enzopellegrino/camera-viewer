@@ -73,9 +73,9 @@ echo '  ╠═══════════════════════
 echo '  ║  📡 Nessun ethernet — Hotspot WiFi attivo  ║'
 echo '  ║                                           ║'
 echo '  ║   1. Connettiti al WiFi: ${ssid}       ║'
+echo '  ║      Password: cameraviewer               ║'
 echo '  ║   2. Apri:  http://${ap_ip}          ║'
 echo '  ║   3. Login: admin / admin                 ║'
-echo '  ║   4. Configura WiFi dal portale           ║'
 echo '  ╚═══════════════════════════════════════════╝'
 sleep 60"
     elif [ -n "$ip" ]; then
