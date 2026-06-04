@@ -30,12 +30,13 @@ case "$EVENT" in
         fi
         ;;
     up)
-        # Ethernet tornata — ferma l'hotspot se attivo
-        AP_CON=$(nmcli -t -f NAME,TYPE con show --active 2>/dev/null | grep "wifi" | grep -i "hotspot\|Camera-Viewer" | cut -d: -f1 | head -1)
-        if [ -n "$AP_CON" ]; then
-            log "Ethernet ripristinata — fermo hotspot '$AP_CON'..."
-            nmcli con down "$AP_CON" 2>/dev/null || true
-            rm -f /tmp/cv-ap-mode
-        fi
+        # Ethernet tornata — ferma qualsiasi hotspot WiFi attivo
+        for AP_CON in "Hotspot" "Camera-Viewer-AP"; do
+            if nmcli con show --active 2>/dev/null | grep -q "$AP_CON"; then
+                log "Ethernet ripristinata — fermo hotspot '$AP_CON'..."
+                nmcli con down "$AP_CON" 2>/dev/null || true
+            fi
+        done
+        rm -f /tmp/cv-ap-mode 2>/dev/null || true
         ;;
 esac
