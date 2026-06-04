@@ -145,7 +145,7 @@ def connect_wifi(ssid: str, password: str) -> tuple[bool, str]:
     ):
         return False, "Credenziali WiFi non valide"
 
-    args = ["nmcli", "dev", "wifi", "connect", ssid]
+    args = ["sudo", "-n", "nmcli", "dev", "wifi", "connect", ssid]
     if password:
         args += ["password", password]
     rc, out, err = _run(args, timeout=45)
