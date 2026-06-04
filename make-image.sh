@@ -143,6 +143,22 @@ update-grub 2>&1 | grep -E 'Found|done|error' | head -5
 echo GRUB_OK
 "
 for d in run sys proc dev/pts dev; do umount \$MNT/\$d 2>/dev/null || true; done
+
+# SOSTITUISCI BOOTX64.EFI con grub-mkimage (incorpora ricerca partizione)
+# grub-install da solo non sa trovare la partizione su macchine diverse
+KERNEL_VER=\$(ls \$MNT/boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|'\$MNT'/boot/vmlinuz-||')
+cat > /tmp/grub-early-img.cfg << EARLY
+search --no-floppy --label --set=root cv-system
+set prefix=(\\\$root)/boot/grub
+EARLY
+grub-mkimage \
+    --format=x86_64-efi \
+    --output=\$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI \
+    --config=/tmp/grub-early-img.cfg \
+    --prefix=/boot/grub \
+    part_gpt fat ext2 normal boot linux search search_label all_video && \
+echo "BOOTX64.EFI autocontenuto creato"
+
 umount \$MNT/boot/efi && umount \$MNT
 losetup -d \$LOOP
 
