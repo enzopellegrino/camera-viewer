@@ -116,6 +116,7 @@ rsync -aAX --delete --info=progress2 \
     --exclude='/media/*' --exclude='/data/*' --exclude='/swap.img' \
     --exclude='/boot/efi/*' \
     --exclude='/home/pi/.config/camera-viewer/*' \
+    --exclude='/home/pi/camera-viewer/config.json' \
     --exclude='/home/pi/setup-nuc.*' \
     --exclude='/etc/NetworkManager/system-connections/*' \
     / \$MNT/ 2>/dev/null
@@ -129,11 +130,27 @@ UUID=\$EFI_UUID  /boot/efi  vfat  defaults          0 2
 LABEL=cv-data   /data      ext4  defaults,noatime  0 2
 EOF
 
-echo "Config iniziale pulita (nessuna telecamera/VPN)..."
-mkdir -p \$MNT/data/camera-viewer
-cat > \$MNT/data/camera-viewer/config.json << 'CFGJSON'
-{"cameras":[],"screens":[],"settings":{"kiosk_mode":true,"reconnect_delay_ms":5000,"render_fps":25},"site_name":"Camera Viewer","users":[]}
-CFGJSON
+echo "Config iniziale (admin/admin con must_change_password=True)..."
+mkdir -p \$MNT/home/pi/.config/camera-viewer
+python3 -c "
+import json,uuid
+try: from werkzeug.security import generate_password_hash
+except: import subprocess; subprocess.run(['pip3','install','werkzeug','-q']); from werkzeug.security import generate_password_hash
+cfg = {
+  'cameras':[], 'screens':[],
+  'settings':{'kiosk_mode':True,'reconnect_delay_ms':5000,'render_fps':25},
+  'site_name':'Camera Viewer',
+  'vpn_profiles':[],
+  'users':[{'id':uuid.uuid4().hex[:8],'username':'admin',
+    'password_hash':generate_password_hash('admin'),
+    'role':'admin','must_change_password':True}]
+}
+json.dump(cfg, open('/tmp/cv-init-config.json','w'), indent=2)
+print('Config creato')
+"
+cp /tmp/cv-init-config.json \$MNT/home/pi/.config/camera-viewer/config.json
+chown -R 1000:1000 \$MNT/home/pi/.config/camera-viewer/
+echo "Config pronto con must_change_password=True"
 
 echo "Installo GRUB dal chroot..."
 for d in dev dev/pts proc sys run; do mount --bind /\$d \$MNT/\$d 2>/dev/null || true; done
