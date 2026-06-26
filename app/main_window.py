@@ -9,11 +9,85 @@ from .grid_widget import GridWidget, LAYOUTS
 from .settings_dialog import SettingsDialog
 from .auth_dialog import AuthDialog, ROLE_LABELS
 from .about_dialog import AboutDialog
-from .license_manager import check_license, LicenseStatus
+from .license_manager import check_license, check_kiosk_license, LicenseStatus
 from .license_dialog import TrialBanner
 
 
 _TOOLBAR_STYLE = "background-color: #1a1a1a; border-bottom: 1px solid #2e2e2e;"
+
+
+# ── License expired overlay (kiosk / NUC) ─────────────────────────────────────
+
+class LicenseExpiredOverlay(QWidget):
+    """Full-screen overlay shown when the kiosk license has expired.
+
+    Shows the lock icon, the 'Licenza scaduta' message and the portal URL
+    so the operator can connect via browser and enter a new license key.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("background: rgba(0,0,0,230);")
+
+        vbox = QVBoxLayout(self)
+        vbox.setAlignment(Qt.AlignCenter)
+        vbox.setSpacing(16)
+        vbox.setContentsMargins(40, 40, 40, 40)
+
+        icon = QLabel("🔒")
+        icon.setAlignment(Qt.AlignCenter)
+        icon.setStyleSheet("font-size: 72px; background: transparent;")
+        vbox.addWidget(icon)
+
+        title = QLabel("Licenza scaduta")
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet(
+            "color: #ff5c5c; font-size: 32px; font-weight: bold; background: transparent;"
+        )
+        vbox.addWidget(title)
+
+        sub = QLabel(
+            "Collega un dispositivo alla rete e accedi al portale per rinnovare la licenza:"
+        )
+        sub.setAlignment(Qt.AlignCenter)
+        sub.setWordWrap(True)
+        sub.setStyleSheet("color: #aaa; font-size: 14px; background: transparent;")
+        vbox.addWidget(sub)
+
+        self._ip_label = QLabel("")
+        self._ip_label.setAlignment(Qt.AlignCenter)
+        self._ip_label.setStyleSheet(
+            "color: #4fc8f7; font-size: 24px; font-weight: bold; font-family: monospace;"
+            "background: #0a1a2a; border: 2px solid #4fc8f7; border-radius: 10px;"
+            "padding: 12px 28px;"
+        )
+        vbox.addWidget(self._ip_label, alignment=Qt.AlignCenter)
+
+        note = QLabel("Impostazioni → Licenza → inserisci la nuova chiave")
+        note.setAlignment(Qt.AlignCenter)
+        note.setStyleSheet("color: #666; font-size: 12px; background: transparent;")
+        vbox.addWidget(note)
+
+        self._update_ip()
+        self._timer = QTimer(self)
+        self._timer.setInterval(30_000)
+        self._timer.timeout.connect(self._update_ip)
+        self._timer.start()
+
+    def _update_ip(self):
+        import subprocess
+        try:
+            raw = subprocess.check_output(["hostname", "-I"], timeout=2, text=True).strip()
+            ip = raw.split()[0] if raw.split() else ""
+            self._ip_label.setText(f"http://{ip}" if ip else "http://<ip-dispositivo>")
+        except Exception:
+            self._ip_label.setText("http://<ip-dispositivo>")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.parent():
+            self.setGeometry(0, 0, self.parent().width(), self.parent().height())
 
 
 # ── Scene Switcher Bar ────────────────────────────────────────────────────────
@@ -230,6 +304,7 @@ class MainWindow(QMainWindow):
         self._root_vbox: QVBoxLayout | None = None
         self._current_user: dict | None = None
         self._single_cam_mode = False
+        self._license_overlay: LicenseExpiredOverlay | None = None
 
         self._build_ui()
         self._setup_shortcuts()
@@ -238,6 +313,14 @@ class MainWindow(QMainWindow):
             self._enter_kiosk()
         else:
             self._load_screen(self._current_idx)
+
+        # Kiosk license check — runs only on Linux
+        if platform.system() == "Linux":
+            QTimer.singleShot(800, self._check_kiosk_license)
+            self._lic_poll = QTimer(self)
+            self._lic_poll.setInterval(3_600_000)   # ogni ora
+            self._lic_poll.timeout.connect(self._check_kiosk_license)
+            self._lic_poll.start()
 
     # ------------------------------------------------------------------ build
 
@@ -487,6 +570,8 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._rebuild_toolbar)
                 QTimer.singleShot(0, self._refresh_switcher)
                 QTimer.singleShot(0, lambda i=idx: self._load_screen(i))
+        elif cmd == "license:reload":
+            QTimer.singleShot(0, self._check_kiosk_license)
 
     def _on_camera_clicked(self, widget):
         if self._single_cam_mode:
@@ -562,6 +647,10 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._position_switcher()
+        if self._license_overlay:
+            root = self.centralWidget()
+            if root:
+                self._license_overlay.setGeometry(0, 0, root.width(), root.height())
 
     def _position_switcher(self):
         # Let the bar reposition itself based on expanded state
@@ -598,6 +687,24 @@ class MainWindow(QMainWindow):
         if self.config.settings.get("kiosk_mode", False):
             return True
         return self._is_raspberry_pi()
+
+    # ----------------------------------------------------------- kiosk license
+
+    def _check_kiosk_license(self):
+        """Show or hide the license expired overlay (Linux kiosk only)."""
+        status = check_kiosk_license()
+        root = self.centralWidget()
+        if status == LicenseStatus.LICENSED:
+            if self._license_overlay:
+                self._license_overlay.hide()
+                self._license_overlay.deleteLater()
+                self._license_overlay = None
+        else:
+            if not self._license_overlay and root:
+                self._license_overlay = LicenseExpiredOverlay(root)
+                self._license_overlay.setGeometry(0, 0, root.width(), root.height())
+                self._license_overlay.raise_()
+                self._license_overlay.show()
 
     # ----------------------------------------------------------- close
 

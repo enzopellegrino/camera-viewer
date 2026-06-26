@@ -34,13 +34,13 @@ from cryptography.hazmat.primitives.asymmetric import padding
 TRIAL_DAYS = 7
 
 _PUBLIC_KEY_PEM = b"""-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqUhfxNDsClE2H7+oYL3X
-tbgFE82kbaxHFuz2xH6eaYBrJJDF3hE7zkgVF8Pnf9PcuFmqDbl2fYoAmgfxuhH9
-a97wnYXLFsf7UR4vg6mcFIlmCH3lgJNjYHcsnAg0oUZ67Dbr28RcPB8i6tcNDZJR
-A/Vcu5xrZByWrXSsEeGmiv4ojDXqZXI2BM96O2qZ9wmEwgHxKPtfWZJWsQBGFZlA
-Ok7mTrk6ej3z4aWgL5cwE+OPojWbjiqW5AZASJH8KbFvf3YXINPdb6rQcwzmv9XJ
-/4MbjEFzMRXmztuNHIw7MGqp/VZxBH2u32c6QYVxAc5Z1QJ2yz9lSIHbQi/apSfm
-ywIDAQAB
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAl1DE9SUiwT3lXHrRerjw
+COi9zOlizysm99Irv0+LJf5sW5GVqfo9MKUGuk/R7qvE8uUKEvtjycjfWQU631BK
+SH3mI4i9VjZKnYMzfO/igWjPjfjfZgj3JTWTAufjPKYCJMN6Deb0WaQUnsZTUySE
+1sUG6QvjPVPAjk0CE1LUTFtkNZdcJ1zWeV56fNnFnWrqWNJsU/G8dPpSsMsH14BU
+nuXy1d/TmEzPddAWt/+o2W9p8OX+S5i+ZlnkREOd/xWayX2y1w7UQ0u5wvtSkKNr
+sWiH4fdu6FnGjM6gIkTJMOHCSbkfTKtLFtaO3R8RKC9ByhNTt5xUSlDWeX8wBgj+
+vwIDAQAB
 -----END PUBLIC KEY-----"""
 
 _HMAC_SALT = b"cv-trial-2025-n1computer"
@@ -174,4 +174,56 @@ def check_license() -> LicenseStatus:
     _update_trial_last_seen()
     if trial_days_remaining() > 0:
         return LicenseStatus.TRIAL_ACTIVE
+    return LicenseStatus.TRIAL_EXPIRED
+
+
+# ── Kiosk / NUC license (stored in config.json) ───────────────────────────────
+
+def _config_license_key() -> str:
+    """Read license_key field from the shared config.json."""
+    import json
+    from pathlib import Path
+    cfg_path = Path.home() / ".config" / "camera-viewer" / "config.json"
+    env_path = __import__("os").environ.get("CAMERA_VIEWER_CONFIG")
+    if env_path:
+        cfg_path = Path(env_path)
+    try:
+        return json.loads(cfg_path.read_text()).get("license_key", "")
+    except Exception:
+        return ""
+
+
+def get_kiosk_license_info() -> dict:
+    """Returns license status for the kiosk/NUC system.
+
+    Reads the key from config.json (shared with the Flask portal).
+    Return shape:
+        {"valid": bool, "type": "lifetime"|"timed"|None,
+         "expires": "YYYY-MM-DD"|None, "site": str}
+    """
+    key = _config_license_key()
+    if not key:
+        return {"valid": False, "type": None, "expires": None, "site": ""}
+    payload = _verify_key(key)
+    if not payload:
+        return {"valid": False, "type": None, "expires": None, "site": ""}
+    ltype = payload.get("type", "")
+    site  = payload.get("site", payload.get("email", ""))
+    if ltype == "lifetime":
+        return {"valid": True, "type": "lifetime", "expires": None, "site": site}
+    if ltype == "timed":
+        expires_str = payload.get("expires", "2000-01-01")
+        try:
+            valid = date.today() <= date.fromisoformat(expires_str)
+        except ValueError:
+            valid = False
+        return {"valid": valid, "type": "timed", "expires": expires_str, "site": site}
+    return {"valid": False, "type": ltype, "expires": None, "site": site}
+
+
+def check_kiosk_license() -> LicenseStatus:
+    """LicenseStatus for the kiosk system based on config.json key."""
+    info = get_kiosk_license_info()
+    if info["valid"]:
+        return LicenseStatus.LICENSED
     return LicenseStatus.TRIAL_EXPIRED

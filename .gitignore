@@ -9,6 +9,8 @@ dist/
 
 # Keys — NEVER commit the private key
 license_private.pem
+tools/private_key.pem
+tools/generate_license.py
 
 # macOS
 .DS_Store

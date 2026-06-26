@@ -873,6 +873,70 @@ def api_mode():
     })
 
 
+# ── API: License ──────────────────────────────────────────────────────────────
+
+def _import_license_verify():
+    """Import _verify_key from app.license_manager (project root on PATH)."""
+    try:
+        from app.license_manager import _verify_key, get_kiosk_license_info
+        return _verify_key, get_kiosk_license_info
+    except ImportError:
+        return None, None
+
+
+@app.route("/api/license", methods=["GET"])
+@login_required()
+def api_license_get():
+    _, get_info = _import_license_verify()
+    if get_info is None:
+        return jsonify({"ok": False, "error": "License module not available"}), 500
+    info = get_info()
+    return jsonify({"ok": True, **info})
+
+
+@app.route("/api/license", methods=["POST"])
+@login_required(admin=True)
+def api_license_set():
+    from datetime import date as _date
+    verify_key, _ = _import_license_verify()
+    if verify_key is None:
+        return jsonify({"ok": False, "error": "License module not available"}), 500
+
+    data = request.get_json(force=True, silent=True) or {}
+    key = (data.get("key") or "").strip()
+    if not key:
+        return jsonify({"ok": False, "error": "Chiave mancante"}), 400
+
+    payload = verify_key(key)
+    if not payload:
+        return jsonify({"ok": False, "error": "Chiave non valida o firma errata"}), 400
+
+    ltype = payload.get("type", "")
+    if ltype == "timed":
+        try:
+            exp = _date.fromisoformat(payload.get("expires", "2000-01-01"))
+        except ValueError:
+            return jsonify({"ok": False, "error": "Data di scadenza non valida"}), 400
+        if exp < _date.today():
+            return jsonify({
+                "ok": False,
+                "error": f"Licenza già scaduta il {payload.get('expires')}",
+            }), 400
+    elif ltype not in ("lifetime",):
+        return jsonify({"ok": False, "error": f"Tipo licenza non riconosciuto: {ltype}"}), 400
+
+    store.set_license_key(key)
+
+    # Notify viewer to re-check license without restarting
+    try:
+        with open(_VIEWER_CMD_FILE, "w") as f:
+            f.write("license:reload")
+    except OSError:
+        pass
+
+    return jsonify({"ok": True, "payload": payload})
+
+
 def main():
     port = int(os.environ.get("PORT", "8080"))
     host = os.environ.get("HOST", "0.0.0.0")

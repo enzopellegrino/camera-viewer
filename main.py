@@ -70,11 +70,14 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Camera Viewer")
 
-    status = check_license()
-    if status == LicenseStatus.TRIAL_EXPIRED:
-        dlg = LicenseDialog(expired=True)
-        if dlg.exec() != QDialog.Accepted:
-            sys.exit(0)
+    # On Linux kiosk the license overlay is handled inside MainWindow
+    # so the camera view stays visible behind it (non-blocking).
+    if not sys.platform.startswith("linux"):
+        status = check_license()
+        if status == LicenseStatus.TRIAL_EXPIRED:
+            dlg = LicenseDialog(expired=True)
+            if dlg.exec() != QDialog.Accepted:
+                sys.exit(0)
 
     config = ConfigManager(_config_path())
     window = MainWindow(config)

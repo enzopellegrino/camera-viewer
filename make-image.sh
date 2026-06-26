@@ -78,6 +78,47 @@ NUC_USED=$(sshpass -p "$NUC_PASS" ssh "${SSH_O[@]}" "$NUC_USER@$NUC_IP" \
     "df -BM / | tail -1 | awk '{print \$3}'" 2>/dev/null)
 ok "NUC: $HOSTNAME — sistema usato: $NUC_USED"
 
+# ── Copia script installer sul NUC ────────────────────────────────────────────
+sshpass -p "$NUC_PASS" scp "${SCP_O[@]}" \
+    "$SCRIPT_DIR/tools/install-camera-viewer.sh" \
+    "$NUC_USER@$NUC_IP:/tmp/cv-installer-script.sh"
+
+# Prepara servizio systemd e voce GRUB (heredoc quoted → nessuna espansione locale)
+sshpass -p "$NUC_PASS" ssh "${SSH_O[@]}" "$NUC_USER@$NUC_IP" "sudo bash -s" << 'PREPFILES'
+cat > /tmp/cv-installer.service << 'EOF'
+[Unit]
+Description=Camera Viewer Installer
+ConditionKernelCommandLine=cv_install=1
+After=local-fs.target
+DefaultDependencies=no
+Conflicts=camera-bootmode.service camera-webconfig.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/install-camera-viewer.sh
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /tmp/cv-40custom << 'EOF'
+#!/bin/sh
+exec tail -n +3 $0
+
+menuentry "  Installa Camera Viewer v2.0 su disco interno" {
+    linux /boot/vmlinuz root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target quiet
+    initrd /boot/initrd.img
+}
+EOF
+echo "File installer pronti"
+PREPFILES
+ok "File installer pronti"
+
 # ── Build immagine sul NUC ────────────────────────────────────────────────────
 step 2 "Creazione immagine disco sul NUC (~10 min)..."
 sshpass -p "$NUC_PASS" ssh "${SSH_O[@]}" "$NUC_USER@$NUC_IP" "sudo bash -s" << BUILDSSH
@@ -141,6 +182,7 @@ cfg = {
   'settings':{'kiosk_mode':True,'reconnect_delay_ms':5000,'render_fps':25},
   'site_name':'Camera Viewer',
   'vpn_profiles':[],
+  'license_key':'',
   'users':[{'id':uuid.uuid4().hex[:8],'username':'admin',
     'password_hash':generate_password_hash('admin'),
     'role':'admin','must_change_password':True}]
@@ -151,6 +193,30 @@ print('Config creato')
 cp /tmp/cv-init-config.json \$MNT/home/pi/.config/camera-viewer/config.json
 chown -R 1000:1000 \$MNT/home/pi/.config/camera-viewer/
 echo "Config pronto con must_change_password=True"
+
+echo "Aggiungo installer e menu GRUB..."
+# Script installer
+cp /tmp/cv-installer-script.sh \$MNT/usr/local/bin/install-camera-viewer.sh
+chmod 755 \$MNT/usr/local/bin/install-camera-viewer.sh
+
+# Servizio systemd
+cp /tmp/cv-installer.service \$MNT/etc/systemd/system/cv-installer.service
+mkdir -p \$MNT/etc/systemd/system/multi-user.target.wants
+ln -sf /etc/systemd/system/cv-installer.service \
+    \$MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service
+
+# GRUB: mostra menu con timeout 15s, nome "Camera Viewer"
+sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=15/' \$MNT/etc/default/grub || true
+sed -i 's/^GRUB_TIMEOUT_STYLE=.*/GRUB_TIMEOUT_STYLE=menu/' \$MNT/etc/default/grub || true
+sed -i 's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="Camera Viewer"/' \$MNT/etc/default/grub || true
+# Se GRUB_TIMEOUT_STYLE non esiste, aggiungilo
+grep -q '^GRUB_TIMEOUT_STYLE=' \$MNT/etc/default/grub || \
+    echo 'GRUB_TIMEOUT_STYLE=menu' >> \$MNT/etc/default/grub
+
+# Voce GRUB installer (40_custom eseguito da update-grub)
+cp /tmp/cv-40custom \$MNT/etc/grub.d/40_custom
+chmod 755 \$MNT/etc/grub.d/40_custom
+echo "Installer e GRUB configurati"
 
 echo "Installo GRUB dal chroot..."
 for d in dev dev/pts proc sys run; do mount --bind /\$d \$MNT/\$d 2>/dev/null || true; done

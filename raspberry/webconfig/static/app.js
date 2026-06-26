@@ -894,6 +894,44 @@ $('#wifi-cancel-btn')?.addEventListener('click', () => {
   _selectedSsid = '';
 });
 
+// ── License ───────────────────────────────────────────────────────────────
+async function loadLicenseStatus() {
+  const { ok, data } = await api('/api/license');
+  const box = $('#license-status-box');
+  if (!box) return;
+  if (!ok) { box.innerHTML = '<p class="text-muted" style="font-size:.85rem">Non disponibile</p>'; return; }
+
+  const { valid, type, expires, site } = data;
+  let badge, detail;
+  if (valid && type === 'lifetime') {
+    badge = '<span style="background:#1a3a1a;color:#4caf50;border:1px solid #4caf50;border-radius:4px;padding:2px 10px;font-size:.8rem;font-weight:600">✅ Lifetime</span>';
+    detail = site ? `Intestata a: <strong>${site}</strong>` : '';
+  } else if (valid && type === 'timed') {
+    badge = `<span style="background:#1a2a3a;color:#4fc8f7;border:1px solid #4fc8f7;border-radius:4px;padding:2px 10px;font-size:.8rem;font-weight:600">✅ Valida fino al ${expires}</span>`;
+    detail = site ? `Intestata a: <strong>${site}</strong>` : '';
+  } else {
+    badge = '<span style="background:#3a1a1a;color:#ff5c5c;border:1px solid #ff5c5c;border-radius:4px;padding:2px 10px;font-size:.8rem;font-weight:600">🔒 Licenza scaduta o non presente</span>';
+    detail = 'Inserisci una chiave di licenza valida per attivare il sistema.';
+  }
+  box.innerHTML = `<div style="margin-bottom:8px">${badge}</div>${detail ? `<p class="text-muted" style="font-size:.83rem;margin:4px 0">${detail}</p>` : ''}`;
+}
+
+$('#license-save-btn')?.addEventListener('click', async () => {
+  const key = $('#license-key-input').value.trim();
+  const errEl = $('#license-error');
+  errEl.style.display = 'none';
+  if (!key) { errEl.textContent = 'Inserisci la chiave di licenza'; errEl.style.display = 'block'; return; }
+  const { ok, data } = await api('/api/license', { method: 'POST', body: JSON.stringify({ key }) });
+  if (ok) {
+    toast('✅ Licenza attivata!', 'ok');
+    $('#license-key-input').value = '';
+    loadLicenseStatus();
+  } else {
+    errEl.textContent = data.error || 'Errore attivazione licenza';
+    errEl.style.display = 'block';
+  }
+});
+
 // ── Apply / Setup mode ────────────────────────────────────────────────────
 $('#apply-btn')?.addEventListener('click', async () => {
   const { ok, data } = await api('/api/apply', { method: 'POST' });
@@ -951,6 +989,7 @@ $('#apply-btn')?.addEventListener('click', async () => {
     loadPlaceholder(),
     loadWallpaper(),
     loadUsers(),
+    loadLicenseStatus(),
   ]);
 
   // Poll status every 30s

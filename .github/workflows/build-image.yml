@@ -1,0 +1,164 @@
+name: Build Distributable Image
+
+# Scarica l'immagine base dalla release, aggiunge il menu installer (GRUB),
+# ricomprime e carica il file finale sulla stessa release.
+#
+# Prerequisito: la release deve contenere "camera-viewer-base.img.xz"
+# (immagine prodotta da make-image.sh sul NUC, senza installer).
+#
+# Output: "camera-viewer-vX.Y.img.xz" caricato sulla stessa release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag della release (es. v2.0)'
+        required: true
+        default: 'v2.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Imposta variabili
+        id: vars
+        run: |
+          TAG="${{ github.event.inputs.release_tag }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG"          >> $GITHUB_OUTPUT
+          echo "version=$VERSION"  >> $GITHUB_OUTPUT
+          echo "Tag: $TAG  |  Versione: $VERSION"
+          df -h .
+
+      # ── Download immagine base ─────────────────────────────────────────────
+      - name: Download immagine base dalla release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download ${{ steps.vars.outputs.tag }} \
+            --pattern "camera-viewer-base.img.xz" \
+            --dir /tmp
+          ls -lh /tmp/camera-viewer-base.img.xz
+
+      # ── Decomprimi ────────────────────────────────────────────────────────
+      - name: Decompressione immagine
+        run: |
+          echo "Decompressione in corso..."
+          xz -d -T0 /tmp/camera-viewer-base.img.xz
+          ls -lh /tmp/camera-viewer-base.img
+          df -h .
+
+      # ── Monta e modifica ──────────────────────────────────────────────────
+      - name: Monta immagine e aggiungi installer
+        run: |
+          IMG=/tmp/camera-viewer-base.img
+          MNT=/mnt/cv-img
+
+          LOOP=$(sudo losetup -f --show -P "$IMG")
+          echo "Loop device: $LOOP"
+
+          sudo mkdir -p $MNT
+          sudo mount ${LOOP}p2 $MNT
+          sudo mkdir -p $MNT/boot/efi
+          sudo mount ${LOOP}p1 $MNT/boot/efi
+
+          # ── Script installer ───────────────────────────────────────────
+          sudo cp tools/install-camera-viewer.sh $MNT/usr/local/bin/install-camera-viewer.sh
+          sudo chmod 755 $MNT/usr/local/bin/install-camera-viewer.sh
+          echo "✓ Script installer copiato"
+
+          # ── Servizio systemd ───────────────────────────────────────────
+          sudo tee $MNT/etc/systemd/system/cv-installer.service > /dev/null << 'EOF'
+          [Unit]
+          Description=Camera Viewer Installer
+          ConditionKernelCommandLine=cv_install=1
+          After=local-fs.target
+          DefaultDependencies=no
+          Conflicts=camera-bootmode.service camera-webconfig.service
+
+          [Service]
+          Type=oneshot
+          ExecStart=/usr/local/bin/install-camera-viewer.sh
+          StandardInput=tty
+          StandardOutput=tty
+          StandardError=tty
+          TTYPath=/dev/tty1
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          sudo mkdir -p $MNT/etc/systemd/system/multi-user.target.wants
+          sudo ln -sf /etc/systemd/system/cv-installer.service \
+            $MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service
+          echo "✓ Servizio systemd abilitato"
+
+          # ── GRUB: mostra menu con timeout 15s ─────────────────────────
+          GRUB_CFG=$MNT/boot/grub/grub.cfg
+
+          sudo sed -i 's/set timeout_style=hidden/set timeout_style=menu/' $GRUB_CFG
+          sudo sed -i 's/^  set timeout=0$/  set timeout=15/'              $GRUB_CFG
+
+          # Rinomina Ubuntu → Camera Viewer nel menuentry principale
+          sudo sed -i "s/menuentry 'Ubuntu'/menuentry 'Camera Viewer'/"  $GRUB_CFG
+          sudo sed -i 's/menuentry "Ubuntu"/menuentry "Camera Viewer"/'  $GRUB_CFG
+
+          # Leggi kernel e initrd reali dall'existing grub.cfg
+          KERNEL=$(grep -oP '(?<=linux )/boot/vmlinuz-[^ ]+' $GRUB_CFG | head -1)
+          INITRD=$(grep -oP '(?<=initrd )/boot/initrd.img-[^ ]+' $GRUB_CFG | head -1)
+          echo "Kernel: $KERNEL"
+          echo "Initrd: $INITRD"
+
+          if [ -z "$KERNEL" ] || [ -z "$INITRD" ]; then
+            echo "::error::Kernel o initrd non trovati in grub.cfg"
+            cat $GRUB_CFG
+            exit 1
+          fi
+
+          # Aggiungi voce installer in fondo a grub.cfg
+          sudo tee -a $GRUB_CFG > /dev/null << EOF
+
+          menuentry "  Installa Camera Viewer v${{ steps.vars.outputs.version }} su disco interno" {
+              linux $KERNEL root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target quiet
+              initrd $INITRD
+          }
+          EOF
+          echo "✓ Menu GRUB: timeout=15s, voce Installa aggiunta"
+
+          # ── Smonta ────────────────────────────────────────────────────
+          sudo umount $MNT/boot/efi
+          sudo umount $MNT
+          sudo losetup -d $LOOP
+          echo "✓ Immagine modificata e smontata"
+
+      # ── Ricomprimi ────────────────────────────────────────────────────────
+      - name: Ricompressione immagine
+        run: |
+          echo "Compressione xz -6 in corso (~5 min)..."
+          xz -6 -T0 /tmp/camera-viewer-base.img
+          OUTPUT="camera-viewer-${{ steps.vars.outputs.tag }}.img.xz"
+          mv /tmp/camera-viewer-base.img.xz "$OUTPUT"
+          ls -lh "$OUTPUT"
+
+      # ── Pubblica ──────────────────────────────────────────────────────────
+      - name: Carica immagine sulla release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          OUTPUT="camera-viewer-${{ steps.vars.outputs.tag }}.img.xz"
+          gh release upload ${{ steps.vars.outputs.tag }} "$OUTPUT" --clobber
+          echo ""
+          echo "✅ Immagine pubblicata:"
+          echo "   $(ls -lh $OUTPUT | awk '{print $5, $9}')"
+          echo ""
+          echo "Per flashare su USB:"
+          echo "   bash make-usb.sh /dev/diskX"
+          echo "   oppure Balena Etcher → $OUTPUT"

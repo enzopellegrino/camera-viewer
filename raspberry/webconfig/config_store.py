@@ -111,6 +111,8 @@ def _normalize(cfg: dict) -> dict:
     cfg.setdefault("site_name", "Camera Viewer")
     # Migrate: rimuovi vecchia chiave vpn (sostituita da vpn_profiles)
     cfg.pop("vpn", None)
+    # Migrate: license key (empty string = no license)
+    cfg.setdefault("license_key", "")
     # Migrate: users — create default admin on first run
     if not isinstance(cfg.get("users"), list) or not cfg["users"]:
         from werkzeug.security import generate_password_hash
@@ -466,3 +468,15 @@ def get_active_vpn_profile() -> dict | None:
         if p.get("active"):
             return p
     return None
+
+
+# ── License key ───────────────────────────────────────────────────────────────
+
+def get_license_key() -> str:
+    return load_config().get("license_key", "")
+
+
+def set_license_key(key: str) -> None:
+    def _apply(cfg):
+        cfg["license_key"] = key.strip()
+    mutate(_apply)
