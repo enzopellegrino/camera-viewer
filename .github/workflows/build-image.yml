@@ -101,21 +101,12 @@ jobs:
             $MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service
           echo "✓ Servizio systemd abilitato"
 
-          # ── GRUB: mostra menu con timeout 15s ─────────────────────────
+          # ── GRUB: leggi kernel e initrd dal grub.cfg esistente ───────
           GRUB_CFG=$MNT/boot/grub/grub.cfg
-
-          sudo sed -i 's/set timeout_style=hidden/set timeout_style=menu/' $GRUB_CFG
-          sudo sed -i 's/^  set timeout=0$/  set timeout=15/'              $GRUB_CFG
 
           # Rinomina Ubuntu → Camera Viewer nel menuentry principale
           sudo sed -i "s/menuentry 'Ubuntu'/menuentry 'Camera Viewer'/"  $GRUB_CFG
           sudo sed -i 's/menuentry "Ubuntu"/menuentry "Camera Viewer"/'  $GRUB_CFG
-
-          # Leggi kernel e initrd reali dall'existing grub.cfg
-          # (grub.cfg usa spazi multipli: "linux   /boot/vmlinuz-..." → pattern semplice)
-          echo "--- grub.cfg (prime 60 righe) ---"
-          sudo head -60 $GRUB_CFG || true
-          echo "--- fine ---"
 
           KERNEL=$(sudo grep -oP '/boot/vmlinuz-\S+' $GRUB_CFG | head -1)
           INITRD=$(sudo grep -oP '/boot/initrd\.img-\S+' $GRUB_CFG | head -1)
@@ -128,15 +119,21 @@ jobs:
             exit 1
           fi
 
-          # Aggiungi voce installer in fondo a grub.cfg
+          # Aggiungi in fondo a grub.cfg:
+          # - timeout=15 e style=menu (override sicuro — GRUB usa l'ultima assegnazione)
+          # - voce installer
           sudo tee -a $GRUB_CFG > /dev/null << EOF
+
+          # ── Camera Viewer: override timeout per mostrare il menu ──────
+          set timeout_style=menu
+          set timeout=15
 
           menuentry "  Installa Camera Viewer v${{ steps.vars.outputs.version }} su disco interno" {
               linux $KERNEL root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target quiet
               initrd $INITRD
           }
           EOF
-          echo "✓ Menu GRUB: timeout=15s, voce Installa aggiunta"
+          echo "✓ Menu GRUB: timeout=15s + voce Installa aggiunti in fondo a grub.cfg"
 
           # ── Smonta ────────────────────────────────────────────────────
           sudo umount $MNT/boot/efi
