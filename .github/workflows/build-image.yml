@@ -112,8 +112,8 @@ jobs:
           sudo sed -i 's/menuentry "Ubuntu"/menuentry "Camera Viewer"/'  $GRUB_CFG
 
           # Leggi kernel e initrd reali dall'existing grub.cfg
-          KERNEL=$(grep -oP '(?<=linux )/boot/vmlinuz-[^ ]+' $GRUB_CFG | head -1)
-          INITRD=$(grep -oP '(?<=initrd )/boot/initrd.img-[^ ]+' $GRUB_CFG | head -1)
+          KERNEL=$(sudo grep -oP '(?<=linux )/boot/vmlinuz-[^ ]+' $GRUB_CFG | head -1)
+          INITRD=$(sudo grep -oP '(?<=initrd )/boot/initrd.img-[^ ]+' $GRUB_CFG | head -1)
           echo "Kernel: $KERNEL"
           echo "Initrd: $INITRD"
 
