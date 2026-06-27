@@ -19,11 +19,26 @@ from __future__ import annotations
 
 import json
 import os
+import pwd
 import subprocess
 from pathlib import Path
 
+
+def _kiosk_home() -> str:
+    """Trova la home del primo utente desktop (UID 1000-1999)."""
+    env = os.environ.get("CAMERA_VIEWER_CONFIG")
+    if env:
+        return str(Path(env).parent.parent.parent)
+    for pw in pwd.getpwall():
+        if 1000 <= pw.pw_uid < 65534 and pw.pw_dir.startswith("/home"):
+            return pw.pw_dir
+    return "/home/ubuntu"   # fallback sicuro per NUC Ubuntu
+
+
 CONFIG = Path(os.environ.get(
-    "CAMERA_VIEWER_CONFIG", "/home/pi/.config/camera-viewer/config.json"))
+    "CAMERA_VIEWER_CONFIG",
+    f"{_kiosk_home()}/.config/camera-viewer/config.json",
+))
 FORCE_SETUP = CONFIG.parent / "force-setup"
 
 

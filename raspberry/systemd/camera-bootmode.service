@@ -1,7 +1,7 @@
 [Unit]
 Description=Camera Viewer - boot mode selector (provisioning vs operational)
-After=NetworkManager.service network-online.target camera-webconfig.service
-Wants=network-online.target
+After=NetworkManager.service camera-webconfig.service
+Wants=NetworkManager.service
 
 [Service]
 Type=oneshot

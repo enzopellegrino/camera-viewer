@@ -127,11 +127,47 @@ jobs:
           sudo ln -sf /dev/null $MNT/etc/systemd/system/NetworkManager-wait-online.service 2>/dev/null || true
           echo "✓ network-wait-online mascherato"
 
+          # ── Fix autologin: rileva utente reale (UID 1000) ──────────────
+          KIOSK_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home/ {print $1; exit}' \
+              $MNT/etc/passwd)
+          echo "Utente kiosk rilevato: '$KIOSK_USER'"
+          if [ -n "$KIOSK_USER" ]; then
+            # Aggiorna autologin lightdm
+            if [ -f $MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf ]; then
+              sudo sed -i \
+                "s/autologin-user=.*/autologin-user=${KIOSK_USER}/" \
+                $MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf
+              echo "✓ autologin-user → $KIOSK_USER"
+            fi
+            # Se openbox autostart è ancora in /home/pi ma l'utente è diverso, copia
+            if [ "$KIOSK_USER" != "pi" ] && \
+               [ -f $MNT/home/pi/.config/openbox/autostart ] && \
+               [ ! -f $MNT/home/$KIOSK_USER/.config/openbox/autostart ]; then
+              sudo mkdir -p $MNT/home/$KIOSK_USER/.config/openbox
+              sudo cp $MNT/home/pi/.config/openbox/autostart \
+                     $MNT/home/$KIOSK_USER/.config/openbox/autostart
+              sudo chown -R 1000:1000 $MNT/home/$KIOSK_USER/.config
+              echo "✓ openbox autostart copiato in /home/$KIOSK_USER"
+            fi
+          fi
+
+          # ── Kiosk: cv-ap + cv-bootmode + camera-bootmode.service ───────
+          # cv-ap: gestisce AP WiFi con captive portal (auto-detect interfaccia)
+          sudo cp raspberry/scripts/cv-ap       $MNT/usr/local/sbin/cv-ap
+          sudo cp raspberry/scripts/cv-bootmode $MNT/usr/local/sbin/cv-bootmode
+          sudo chmod 755 $MNT/usr/local/sbin/cv-ap $MNT/usr/local/sbin/cv-bootmode
+          # camera-bootmode.service: avvia cv-bootmode al boot (senza network-online.target)
+          sudo cp raspberry/systemd/camera-bootmode.service \
+              $MNT/etc/systemd/system/camera-bootmode.service
+          sudo mkdir -p $MNT/etc/systemd/system/multi-user.target.wants
+          sudo ln -sf /etc/systemd/system/camera-bootmode.service \
+              $MNT/etc/systemd/system/multi-user.target.wants/camera-bootmode.service
+          echo "✓ cv-ap + cv-bootmode + camera-bootmode.service installati e abilitati"
+
           # ── Hotspot WiFi fallback (file da repo) ───────────────────────
           sudo cp tools/cv-hotspot.sh     $MNT/usr/local/bin/cv-hotspot.sh
           sudo cp tools/cv-hotspot.service $MNT/etc/systemd/system/cv-hotspot.service
           sudo chmod 755 $MNT/usr/local/bin/cv-hotspot.sh
-          sudo mkdir -p $MNT/etc/systemd/system/multi-user.target.wants
           sudo ln -sf /etc/systemd/system/cv-hotspot.service \
             $MNT/etc/systemd/system/multi-user.target.wants/cv-hotspot.service
           echo "✓ Hotspot WiFi fallback configurato (CameraViewer-XXXX / cameraviewer)"

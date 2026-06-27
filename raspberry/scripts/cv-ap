@@ -13,8 +13,15 @@ set -euo pipefail
 AP_CON="cv-ap"
 AP_SSID="CameraViewer-Setup"
 AP_PSK="cameraviewer"
-AP_IFACE="wlan0"
 AP_IP="10.42.0.1"
+
+# Auto-detect WiFi interface (NUC uses wlp1s0, wlan0, etc.)
+AP_IFACE=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null \
+    | grep ":wifi" | cut -d: -f1 | head -1)
+if [ -z "$AP_IFACE" ]; then
+    echo "cv-ap: nessuna interfaccia WiFi trovata" >&2
+    exit 1
+fi
 SHARED_DIR="/etc/NetworkManager/dnsmasq-shared.d"
 CAPTIVE_CONF="$SHARED_DIR/cv-captive.conf"
 
@@ -42,11 +49,14 @@ case "${1:-}" in
     nmcli con down "$AP_CON" >/dev/null 2>&1 || true
     nmcli con up "$AP_CON" >/dev/null
     echo "OK AP up ($AP_SSID @ $AP_IP)"
+
+    # Scrivi info per cv-viewer-launch (mostra overlay SSID/IP sullo schermo)
+    echo "${AP_SSID}|${AP_IP}" > /tmp/cv-ap-mode
     ;;
 
   stop)
     nmcli con down "$AP_CON" >/dev/null 2>&1 || true
-    rm -f "$CAPTIVE_CONF"
+    rm -f "$CAPTIVE_CONF" /tmp/cv-ap-mode
     echo "OK AP down"
     ;;
 

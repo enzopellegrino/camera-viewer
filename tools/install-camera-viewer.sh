@@ -155,6 +155,12 @@ echo ""
 # ── Configurazione sistema installato ─────────────────────────────────────────
 echo "  [5/6] Configurazione..."
 
+# Rileva utente desktop del sistema installato (primo con UID >= 1000)
+KIOSK_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home/ {print $1; exit}' \
+    "$MNT/etc/passwd")
+KIOSK_HOME="/home/${KIOSK_USER:-ubuntu}"
+echo "  Utente kiosk: $KIOSK_USER  (home: $KIOSK_HOME)"
+
 # fstab con UUID del nuovo disco
 tee "$MNT/etc/fstab" > /dev/null << FSTAB
 UUID=$SYS_UUID  /          ext4  defaults,noatime  0 1
@@ -162,8 +168,15 @@ UUID=$EFI_UUID  /boot/efi  vfat  defaults          0 2
 LABEL=cv-data   /data      ext4  defaults,noatime  0 2
 FSTAB
 
+# Assicura che lightdm usi il vero utente kiosk
+if [ -f "$MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf" ]; then
+    sed -i "s/autologin-user=.*/autologin-user=${KIOSK_USER}/" \
+        "$MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf"
+    echo "  ✓ autologin-user → $KIOSK_USER"
+fi
+
 # Config iniziale pulita: admin/admin + must_change_password
-mkdir -p "$MNT/home/pi/.config/camera-viewer"
+mkdir -p "$MNT${KIOSK_HOME}/.config/camera-viewer"
 python3 -c "
 import json, uuid
 try:
@@ -185,8 +198,8 @@ cfg = {
 json.dump(cfg, open('/tmp/cv-init-config.json', 'w'), indent=2)
 print('  Config creato.')
 "
-cp /tmp/cv-init-config.json "$MNT/home/pi/.config/camera-viewer/config.json"
-chown -R 1000:1000 "$MNT/home/pi/.config/camera-viewer/"
+cp /tmp/cv-init-config.json "$MNT${KIOSK_HOME}/.config/camera-viewer/config.json"
+chown -R 1000:1000 "$MNT${KIOSK_HOME}/.config/camera-viewer/"
 
 # Rimuovi il servizio installer dall'installazione finale
 # (non ha senso avere "Installa" nel GRUB del sistema già installato)
