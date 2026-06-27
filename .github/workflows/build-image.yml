@@ -167,10 +167,21 @@ jobs:
               "$KIOSK_USER" | sudo tee $MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf > /dev/null
             echo "✓ autologin-user → $KIOSK_USER"
 
-            # PAM autologin: scritto esplicitamente per evitare problemi su sistemi minimali
-            # senza questo file, lightdm potrebbe mostrare la schermata di login invece di autologin
-            # Usa printf invece di heredoc: i heredoc a colonna 0 rompono il parsing YAML
-            printf '#%%PAM-1.0\nauth    required pam_env.so readenv=1 user_readenv=0\nauth    required pam_succeed_if.so user ingroup nopasswdlogin\n@include common-account\n@include common-session\n' \
+            # Gruppo nopasswdlogin: richiesto da PAM per autologin senza password.
+            # Senza questo pam_succeed_if fallisce → login screen.
+            # Usa sed: nessun blocco multilinea che rompe il YAML.
+            sudo grep -q "^nopasswdlogin:" $MNT/etc/group \
+              || echo "nopasswdlogin:x:64055:" | sudo tee -a $MNT/etc/group > /dev/null
+            sudo grep -qE "^nopasswdlogin:.*:([^,]+,)*${KIOSK_USER}(,[^,]+)*$" $MNT/etc/group \
+              || sudo sed -i "s|^\(nopasswdlogin:[^:]*:[^:]*:\)\(.*\)$|\1\2,${KIOSK_USER}|" $MNT/etc/group
+            sudo sed -i "s|^\(nopasswdlogin:[^:]*:[^:]*:\),|\1|" $MNT/etc/group
+            echo "✓ $KIOSK_USER aggiunto al gruppo nopasswdlogin"
+
+            # PAM autologin: sufficient + pam_permit fallback (belt & suspenders).
+            # - Se utente in nopasswdlogin → successo immediato (sufficient).
+            # - Altrimenti → pam_permit.so garantisce comunque l'autologin kiosk.
+            # Usa printf invece di heredoc: i heredoc a colonna 0 rompono il parsing YAML.
+            printf '#%%PAM-1.0\nauth    required   pam_env.so readenv=1 user_readenv=0\nauth    sufficient pam_succeed_if.so user ingroup nopasswdlogin\nauth    required   pam_permit.so\n@include common-account\n@include common-session\n' \
               | sudo tee $MNT/etc/pam.d/lightdm-autologin > /dev/null
             echo "✓ PAM lightdm-autologin configurato"
 

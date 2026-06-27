@@ -183,6 +183,11 @@ ln -sf /usr/share/zoneinfo/Europe/Rome /etc/localtime
 useradd -m -s /bin/bash -G sudo,audio,video,plugdev pi
 passwd -l pi  # account bloccato nell'immagine; sbloccato al primo avvio
 
+# nopasswdlogin: richiesto da PAM lightdm-autologin per autologin senza password.
+# Senza questo il check pam_succeed_if fallisce → login screen al boot.
+groupadd -f nopasswdlogin
+usermod -aG nopasswdlogin pi
+
 # Sudo ristretto: solo i comandi cv-* elencati in sudoers-cv-helpers.
 # NON usare NOPASSWD:ALL — renderebbe cv-helpers completamente inutile.
 # cv-helpers viene installato sotto (install -m 440 sudoers-cv-helpers /etc/sudoers.d/cv-helpers)
