@@ -12,6 +12,21 @@ set -euo pipefail
 R='\033[0;31m'; G='\033[0;32m'; Y='\033[1;33m'
 C='\033[0;36m'; B='\033[1m'; E='\033[0m'
 
+# ── Cleanup on error: smonta tutto per non lasciare il disco in stato inconsistente
+MNT=/tmp/cv-install-mnt
+_cleanup() {
+    local EXIT=$?
+    [ $EXIT -eq 0 ] && return
+    echo -e "\n  ${R}${B}Errore durante l'installazione — smontaggio dischi...${E}"
+    for d in run sys proc dev/pts dev boot/efi; do
+        umount "$MNT/$d" 2>/dev/null || true
+    done
+    umount "$MNT" 2>/dev/null || true
+    echo -e "  ${R}Installazione interrotta. Il disco potrebbe essere inutilizzabile.${E}"
+    echo -e "  Riavvia dalla USB e riprova."
+}
+trap '_cleanup' ERR
+
 clear
 echo -e "${C}${B}"
 echo "  ╔══════════════════════════════════════════════════╗"
@@ -134,7 +149,6 @@ SYS_UUID=$(blkid -s UUID -o value "$P2")
 
 # ── Mount ──────────────────────────────────────────────────────────────────────
 echo "  [3/6] Montaggio..."
-MNT=/tmp/cv-install-mnt
 mkdir -p "$MNT"
 mount "$P2" "$MNT"
 mkdir -p "$MNT/boot/efi"
@@ -149,7 +163,7 @@ rsync -aAX --delete --info=progress2 \
     --exclude='/media/*' --exclude='/data/*'  --exclude='/swap.img' \
     --exclude='/boot/efi/*' \
     --exclude='/home/pi/.config/camera-viewer/*' \
-    / "$MNT/" 2>/dev/null || true
+    / "$MNT/"
 echo ""
 
 # ── Configurazione sistema installato ─────────────────────────────────────────
@@ -256,8 +270,8 @@ echo ""
 echo -e "${G}${B}╔══════════════════════════════════════════════════════════╗${E}"
 echo -e "${G}${B}║  ✅ Camera Viewer installato correttamente!              ║${E}"
 echo -e "${G}${B}╠══════════════════════════════════════════════════════════╣${E}"
-echo -e "${G}${B}║  1. Rimuovi la USB dal PC                                ║${E}"
-echo -e "${G}${B}║  2. Il PC si riavvierà tra 10 secondi                    ║${E}"
+echo -e "${G}${B}║  1. RIMUOVI LA USB DAL PC prima del riavvio!             ║${E}"
+echo -e "${G}${B}║  2. Il PC si riavvierà tra 30 secondi                    ║${E}"
 echo -e "${G}${B}║  3. Camera Viewer parte dal disco interno                ║${E}"
 echo -e "${G}${B}║                                                          ║${E}"
 echo -e "${G}${B}║  Primo accesso al portale:                               ║${E}"
@@ -265,6 +279,11 @@ echo -e "${G}${B}║    → IP mostrato sullo schermo                           
 echo -e "${G}${B}║    → Login: admin / admin  (cambia subito!)              ║${E}"
 echo -e "${G}${B}╚══════════════════════════════════════════════════════════╝${E}"
 echo ""
-echo -e "  Riavvio in 10 secondi... (${B}Ctrl+C${E} per annullare il riavvio)"
-sleep 10
+echo -e "  ${R}${B}⚠  Rimuovi la USB ora, poi attendi il riavvio.${E}"
+echo -ne "  Riavvio in: "
+for i in $(seq 30 -1 1); do
+    echo -ne "${B}${i}${E} "
+    sleep 1
+done
+echo ""
 reboot

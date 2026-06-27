@@ -12,8 +12,18 @@ set -euo pipefail
 
 AP_CON="cv-ap"
 AP_SSID="CameraViewer-Setup"
-AP_PSK="cameraviewer"
 AP_IP="10.42.0.1"
+
+# PSK generata al primo avvio e salvata in /etc/cv-ap-psk (mode 600, root-only).
+# NON hardcoded nel codice: ogni dispositivo ha una password AP diversa.
+_AP_PSK_FILE="/etc/cv-ap-psk"
+if [ -f "$_AP_PSK_FILE" ]; then
+    AP_PSK=$(cat "$_AP_PSK_FILE")
+else
+    AP_PSK=$(openssl rand -base64 12 | tr -d '/+=' | head -c 12)
+    echo "$AP_PSK" > "$_AP_PSK_FILE"
+    chmod 600 "$_AP_PSK_FILE"
+fi
 
 # Auto-detect WiFi interface (NUC uses wlp1s0, wlan0, etc.)
 AP_IFACE=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null \

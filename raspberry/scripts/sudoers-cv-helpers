@@ -1,6 +1,11 @@
 # Allow the provisioning web app (user pi) to run ONLY the cv-* helpers as root.
 # Install to /etc/sudoers.d/cv-helpers with mode 0440.
+#
+# nmcli: usato da raspberry/webconfig/network.py per configurare IP e WiFi.
+# Ristretto al solo binario nmcli (non ALL) — è già un miglioramento significativo
+# rispetto al vecchio NOPASSWD:ALL in /etc/sudoers.d/pi.
 pi ALL=(root) NOPASSWD: /usr/local/sbin/cv-vpn
 pi ALL=(root) NOPASSWD: /usr/local/sbin/cv-ovpn
 pi ALL=(root) NOPASSWD: /usr/local/sbin/cv-ap
 pi ALL=(root) NOPASSWD: /usr/local/sbin/cv-mode
+pi ALL=(root) NOPASSWD: /usr/bin/nmcli

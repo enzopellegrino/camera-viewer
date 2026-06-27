@@ -155,9 +155,20 @@ def load_config() -> dict:
 
 def save_config(cfg: dict) -> None:
     path = config_path()
+    # Assicura che la directory esista con permessi ristretti (contiene password hash e chiavi VPN)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path.parent, 0o700)
+    except OSError:
+        pass
     tmp = path.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
+    # Permessi 600 prima del rename atomico: config.json contiene password_hash, chiavi VPN, licenze
+    try:
+        os.chmod(tmp, 0o600)
+    except OSError:
+        pass
     tmp.replace(path)  # atomic write
 
 

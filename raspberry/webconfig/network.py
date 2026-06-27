@@ -265,6 +265,11 @@ def set_ip_config(iface_type: str, method: str,
         return False, "nmcli non disponibile"
 
     con = _find_connection(iface_type)
+    if con:
+        # Valida il nome connessione NM prima di passarlo come argomento a nmcli
+        import re as _re
+        if not _re.match(r'^[A-Za-z0-9 _\-\.]+$', con):
+            return False, f"Nome connessione NM non valido: {con!r}"
     if not con:
         dev_type = "ethernet" if iface_type == "ethernet" else "wifi"
         iface   = "eno1" if iface_type == "ethernet" else "wlp1s0"

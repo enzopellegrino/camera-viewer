@@ -23,7 +23,7 @@ CFG_DIR="${_KIOSK_HOME}/.config/camera-viewer"
 # mpv --vo=gpu works for all embedded windows on X11.
 export QT_QPA_PLATFORM=xcb
 export DISPLAY="${DISPLAY:-:0}"
-export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/1000}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 # NUC / Intel Quick Sync: abilita VAAPI sempre (grid + zoom).
 # Su Pi questi restano non impostati → si usa hwdec=auto-safe+x11egl.
@@ -70,6 +70,8 @@ _show_ip_overlay() {
         # Modalità hotspot WiFi
         local ssid="${ap_mode%%|*}"
         local ap_ip="${ap_mode##*|}"
+        # Non mostrare la password AP a schermo: è nel file /etc/cv-ap-psk (root-only).
+        # L'installatore deve recuperarla tramite SSH o etichetta fisica.
         content="echo ''
 echo '  ╔═══════════════════════════════════════════╗'
 echo '  ║   🎥  Camera Viewer v2.4                  ║'
@@ -77,7 +79,7 @@ echo '  ╠═══════════════════════
 echo '  ║  📡 Nessun ethernet — Hotspot WiFi attivo  ║'
 echo '  ║                                           ║'
 echo '  ║   1. Connettiti al WiFi: ${ssid}       ║'
-echo '  ║      Password: cameraviewer               ║'
+echo '  ║      (password: vedi etichetta NUC)       ║'
 echo '  ║   2. Apri:  http://${ap_ip}          ║'
 echo '  ║   3. Login: admin / admin                 ║'
 echo '  ╚═══════════════════════════════════════════╝'
@@ -96,7 +98,20 @@ echo ''
 echo '  (si chiude in 10 secondi...)'
 sleep 10"
     else
-        return  # Nessuna rete, non mostrare nulla
+        # Nessuna rete dopo 15s: mostra comunque un messaggio di stato
+        xterm -T "Camera Viewer" \
+              -fa "Monospace" -fs 16 \
+              -bg "#0c0e18" -fg "#f7a74f" \
+              -geometry 55x8+0+0 \
+              -e bash -c "echo ''
+echo '  ╔═══════════════════════════════════════════╗'
+echo '  ║   🎥  Camera Viewer v2.4                  ║'
+echo '  ╠═══════════════════════════════════════════╣'
+echo '  ║   ⚠  Nessuna rete rilevata               ║'
+echo '  ║   Collega un cavo ethernet e riavvia      ║'
+echo '  ╚═══════════════════════════════════════════╝'
+sleep 60" &
+        return
     fi
 
     xterm -T "Camera Viewer" \
@@ -114,13 +129,17 @@ fi
 # Supervisor loop:
 #  - Provisioning (no telecamere): aspetta in loop finché non vengono configurate.
 #    La sessione openbox resta viva; il portale web (camera-webconfig) è già in
-#    ascolto; l'overlay hotspot/IP è già sullo schermo.
+#    ascolto; l'overlay hotspot/IP viene rimostrato ogni ~60s per evitare schermo nero.
 #  - Operativo (telecamere presenti): avvia main.py e riavvia se crasha.
+_OVERLAY_TICK=0
 while true; do
   [ -f "$CFG_DIR/force-setup" ] && break
 
   if ! $PYTHON3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG_DIR/config.json')).get('cameras') else 1)" 2>/dev/null; then
-    # Nessuna telecamera ancora: siamo in provisioning. Aspetta e riprova.
+    # Nessuna telecamera ancora: siamo in provisioning.
+    # Rimostra l'overlay ogni 60s per evitare schermo nero indefinito.
+    _OVERLAY_TICK=$(( _OVERLAY_TICK + 1 ))
+    [ $(( _OVERLAY_TICK % 6 )) -eq 0 ] && _show_ip_overlay
     sleep 10
     continue
   fi

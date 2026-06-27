@@ -23,7 +23,9 @@ OUTPUT_IMG="$OUTPUT_DIR/camera-viewer-v${VERSION}.img.xz"
 
 NUC_IP="${1:-}"
 NUC_USER="pi"
-NUC_PASS="N1computer@2019"
+# Passa NUC_PASS come variabile d'ambiente: NUC_PASS=xxx bash make-image.sh
+# NON hardcodare la password nel codice.
+NUC_PASS="${NUC_PASS:-}"
 
 # Partizioni immagine
 IMG_SIZE_MB=11264      # 11GB raw (sistema NUC ~8.3GB + margine)
@@ -60,6 +62,13 @@ if [ -f "$OUTPUT_IMG" ]; then
     echo -e "  ${Y}Immagine già esistente: $SIZE${E}"
     read -rp "  Ricostruire? [y/N]: " REBUILD
     [[ "$REBUILD" =~ ^[yY]$ ]] || { echo "Annullato."; exit 0; }
+fi
+
+# ── Verifica password NUC ─────────────────────────────────────────────────────
+if [ -z "$NUC_PASS" ]; then
+    read -rsp "  Password SSH del NUC (utente $NUC_USER): " NUC_PASS
+    echo ""
+    [ -z "$NUC_PASS" ] && { echo "  Errore: password obbligatoria."; exit 1; }
 fi
 
 # ── Trova NUC ─────────────────────────────────────────────────────────────────

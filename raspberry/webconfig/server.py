@@ -43,6 +43,8 @@ def _load_secret() -> bytes:
     try:
         os.makedirs(os.path.dirname(_SECRET_FILE), exist_ok=True)
         open(_SECRET_FILE, "wb").write(key)
+        # Permessi 600: il flask secret non deve essere world-readable
+        os.chmod(_SECRET_FILE, 0o600)
     except OSError:
         pass
     return key
@@ -411,17 +413,23 @@ def api_settings_set():
 
 
 @app.route("/api/restart-viewer", methods=["POST"])
-@login_required()
+@login_required(admin=True)
 def api_restart_viewer():
     """Kill the viewer and relaunch it with the correct display environment.
 
     No sudo needed — viewer and Flask both run as user pi.
+    Richiede admin=True: il restart interrompe il feed video per tutti.
     """
     import signal as _signal
+    import subprocess as _subprocess
     import time as _time
 
-    # Kill any running viewer instance
-    for proc in os.popen("pgrep -f 'python3 main.py'").read().split():
+    # Kill any running viewer instance (subprocess invece di os.popen)
+    result = _subprocess.run(
+        ["pgrep", "-f", "python3 main.py"],
+        capture_output=True, text=True
+    )
+    for proc in result.stdout.split():
         try:
             os.kill(int(proc), _signal.SIGTERM)
         except (ProcessLookupError, ValueError):

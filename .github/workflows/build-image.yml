@@ -156,6 +156,10 @@ jobs:
           KIOSK_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home/ {print $1; exit}' \
               $MNT/etc/passwd)
           echo "Utente kiosk rilevato: '$KIOSK_USER'"
+          if [ -z "$KIOSK_USER" ]; then
+            echo "::error::KIOSK_USER non rilevato in /etc/passwd — l'immagine base non contiene un utente con UID>=1000. Impossibile configurare autologin."
+            exit 1
+          fi
           if [ -n "$KIOSK_USER" ]; then
             # Aggiorna autologin lightdm
             sudo mkdir -p $MNT/etc/lightdm/lightdm.conf.d

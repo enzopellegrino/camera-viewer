@@ -183,9 +183,9 @@ ln -sf /usr/share/zoneinfo/Europe/Rome /etc/localtime
 useradd -m -s /bin/bash -G sudo,audio,video,plugdev pi
 passwd -l pi  # account bloccato nell'immagine; sbloccato al primo avvio
 
-# Sudo senza password per pi (necessario per gli script cv-*)
-echo "pi ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/pi
-chmod 440 /etc/sudoers.d/pi
+# Sudo ristretto: solo i comandi cv-* elencati in sudoers-cv-helpers.
+# NON usare NOPASSWD:ALL — renderebbe cv-helpers completamente inutile.
+# cv-helpers viene installato sotto (install -m 440 sudoers-cv-helpers /etc/sudoers.d/cv-helpers)
 
 # Servizio: genera password SSH random al primo avvio e forza cambio
 cat > /usr/local/sbin/cv-firstboot-ssh << 'SCRIPT'
@@ -388,7 +388,7 @@ chown -R pi:pi /home/pi/.config
 cat > /etc/issue << 'EOF'
 
   ┌─────────────────────────────────────────────┐
-  │   🎥   Camera Viewer v2.4                   │
+  │   🎥   Camera Viewer v${VERSION}                   │
   │        di Enzo Pellegrino                   │
   │        http://\4                            │
   └─────────────────────────────────────────────┘
@@ -503,7 +503,7 @@ set color_highlight=black/cyan
 set menu_color_normal=white/black
 set menu_color_highlight=black/cyan
 
-echo "  Camera Viewer v2.4"
+echo "  Camera Viewer v${VERSION}"
 echo "  di Enzo Pellegrino"
 
 menuentry " Avvia Camera Viewer" {
