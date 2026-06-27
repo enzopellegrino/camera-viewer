@@ -293,15 +293,32 @@ jobs:
             update-initramfs -u -k all || true
             echo PLYMOUTH_OK
           " || echo "(Plymouth update opzionale — continuo)"
+          # Flush I/O e termina eventuali processi rimasti nel chroot
+          # (update-initramfs può avviare udev in background)
+          # 1. fuser PRIMA dei bind-umount: uccide processi che tengono /dev, /proc, ecc.
+          sudo sync
+          sudo fuser -km $MNT 2>/dev/null || true
+          # 2. Aspetta che udev dreni la coda eventi (più affidabile di sleep fisso)
+          sudo udevadm settle --timeout=30 2>/dev/null || true
+          # 3. Smonta bind mounts in ordine inverso con lazy fallback
           for d in run sys proc dev/pts dev; do
-            sudo umount $MNT/$d 2>/dev/null || true
+            sudo umount $MNT/$d 2>/dev/null || sudo umount -l $MNT/$d 2>/dev/null || true
           done
           echo "✓ Plymouth: tema Camera Viewer (details) attivato"
 
           # ── Smonta ────────────────────────────────────────────────────
-          sudo umount $MNT/boot/efi
-          sudo umount $MNT
-          sudo losetup -d $LOOP
+          sudo sync
+          sudo umount $MNT/boot/efi 2>/dev/null || sudo umount -l $MNT/boot/efi 2>/dev/null || true
+          # Se umount normale fallisce, lazy umount + attesa prima di losetup -d
+          # (lazy + losetup immediato può corrompere l'immagine)
+          if ! sudo umount $MNT; then
+            sudo umount -l $MNT
+            sudo sync
+          fi
+          # Retry losetup -d: il loop device potrebbe ancora drenare I/O
+          for i in $(seq 1 10); do
+            sudo losetup -d $LOOP && break || sleep 1
+          done
           echo "✓ Immagine modificata e smontata"
 
       # ── Ricomprimi ────────────────────────────────────────────────────────
