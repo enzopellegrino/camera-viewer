@@ -307,17 +307,20 @@ set -euo pipefail
 
 cd /home/pi/camera-viewer || exit 0
 
-# Python venv
-# venv — PySide6 va installato via pip (non è in apt Ubuntu 24.04)
-# Cache pip → /output (montato dalla VM che ha 43GB liberi)
-export PIP_CACHE_DIR=/tmp/pip-cache
-mkdir -p /tmp/pip-cache
-sudo -H -u pi python3 -m venv .venv
-sudo -H -u pi .venv/bin/pip install --upgrade pip -q
-sudo -H -u pi .venv/bin/pip install -r requirements.txt -q \
-    --cache-dir /tmp/pip-cache
-sudo -H -u pi .venv/bin/pip install flask -q \
-    --cache-dir /tmp/pip-cache
+# Wheel download: scarica i pacchetti Python nell'immagine ma NON li installa.
+# L'installer (install-camera-viewer.sh) crea il venv e installa offline.
+# Risparmia ~1GB nell'immagine USB rispetto a un venv pre-installato.
+# pyinstaller escluso: serve solo per build Mac/Windows, non su kiosk Linux.
+mkdir -p /opt/cv-wheels
+grep -v "pyinstaller" /home/pi/camera-viewer/requirements.txt \
+    > /tmp/cv-requirements-kiosk.txt
+python3 -m pip download \
+    --dest /opt/cv-wheels \
+    --prefer-binary \
+    -r /tmp/cv-requirements-kiosk.txt \
+    flask -q
+echo "✓ Wheels pronti per installazione offline: $(ls /opt/cv-wheels | wc -l) pacchetti"
+du -sh /opt/cv-wheels/ || true
 
 # Script di sistema
 [ -f raspberry/scripts/cv-mode ] && \

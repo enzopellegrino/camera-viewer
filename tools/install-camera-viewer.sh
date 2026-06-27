@@ -30,7 +30,7 @@ trap '_cleanup' ERR
 clear
 echo -e "${C}${B}"
 echo "  ╔══════════════════════════════════════════════════╗"
-echo "  ║   🎥  Camera Viewer v2.7 — Installer            ║"
+echo "  ║   🎥  Camera Viewer — Installer                 ║"
 echo "  ║       Installazione su disco interno            ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${E}"
@@ -156,7 +156,7 @@ mount "$P1" "$MNT/boot/efi"
 mkdir -p "$MNT/data"
 
 # ── Copia sistema ─────────────────────────────────────────────────────────────
-echo "  [4/6] Copia sistema (5-15 minuti, dipende dal disco)..."
+echo "  [4/7] Copia sistema (5-15 minuti, dipende dal disco)..."
 rsync -aAX --delete --info=progress2 \
     --exclude='/proc/*'  --exclude='/sys/*'   --exclude='/dev/*' \
     --exclude='/run/*'   --exclude='/tmp/*'   --exclude='/mnt/*' \
@@ -166,8 +166,51 @@ rsync -aAX --delete --info=progress2 \
     / "$MNT/"
 echo ""
 
+# ── Installa pacchetti Python dal archivio offline ────────────────────────────
+# I wheel files sono stati scaricati durante la build in /opt/cv-wheels.
+# Li installiamo ora nel sistema su disco tramite chroot.
+# Non serve internet: tutto viene da /opt/cv-wheels.
+echo "  [5/7] Installazione pacchetti Python (2-5 minuti)..."
+if ls "$MNT/opt/cv-wheels/"*.whl >/dev/null 2>&1; then
+    WHEEL_COUNT=$(ls "$MNT/opt/cv-wheels/"*.whl | wc -l)
+    echo "  Trovati $WHEEL_COUNT wheel packages in /opt/cv-wheels"
+    # Bind mounts necessari per pip inside chroot
+    for d in dev dev/pts proc sys; do
+        mount --bind "/$d" "$MNT/$d" 2>/dev/null || true
+    done
+    chroot "$MNT" bash -c "
+        set -e
+        APP_DIR=/home/pi/camera-viewer
+        cd \"\$APP_DIR\"
+        # Escludi pyinstaller: serve solo per build Mac/Windows, non su kiosk Linux
+        grep -v 'pyinstaller' requirements.txt > /tmp/cv-requirements-kiosk.txt
+        echo '  Creazione venv...'
+        python3 -m venv .venv
+        echo '  Aggiornamento pip...'
+        .venv/bin/pip install --upgrade pip -q
+        echo '  Installazione pacchetti offline...'
+        .venv/bin/pip install \
+            --no-index \
+            --find-links /opt/cv-wheels \
+            -r /tmp/cv-requirements-kiosk.txt \
+            flask -q
+        echo '  ✓ Pacchetti Python installati nel venv'
+    "
+    # Fix ownership: pi ha UID/GID 1000
+    chown -R 1000:1000 "$MNT/home/pi/camera-viewer/.venv"
+    # Rimuovi wheels dall'installazione finale (inutili su disco)
+    rm -rf "$MNT/opt/cv-wheels"
+    echo "  ✓ Venv pronto — wheels rimossi dal disco installato"
+    # Smonta bind mounts
+    for d in sys proc dev/pts dev; do umount "$MNT/$d" 2>/dev/null || true; done
+else
+    echo "  ⚠  Nessun wheel trovato in /opt/cv-wheels — pip install saltato."
+    echo "  ⚠  Il viewer potrebbe non partire (PySide6 mancante)."
+fi
+echo ""
+
 # ── Configurazione sistema installato ─────────────────────────────────────────
-echo "  [5/6] Configurazione..."
+echo "  [6/7] Configurazione..."
 
 # Rileva utente desktop del sistema installato (primo con UID >= 1000)
 KIOSK_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home/ {print $1; exit}' \
@@ -230,7 +273,7 @@ rm -f "$MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service"
 rm -f "$MNT/etc/grub.d/40_custom"
 
 # ── Bootloader ────────────────────────────────────────────────────────────────
-echo "  [6/6] Installazione bootloader..."
+echo "  [7/7] Installazione bootloader..."
 for d in dev dev/pts proc sys run; do
     mount --bind "/$d" "$MNT/$d" 2>/dev/null || true
 done
