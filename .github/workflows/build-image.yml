@@ -130,10 +130,17 @@ jobs:
           echo "✓ Servizio systemd abilitato"
 
           # ── Fix: nessun servizio blocca il boot senza rete ──────────
-          # cloud-init: 4 servizi che aspettano rete → fino a 2 min di delay
+          # cloud-init: file disabled + maschera i 4 servizi systemd.
+          # Solo il file .disabled non basta: i servizi si avviano comunque,
+          # tengono in sospeso network-online.target e causano 2 min di wait.
           sudo mkdir -p $MNT/etc/cloud
           sudo touch $MNT/etc/cloud/cloud-init.disabled
-          # network-wait-online: bloccano il boot se nessun ethernet
+          for svc in cloud-init cloud-init-local cloud-config cloud-final; do
+            sudo ln -sf /dev/null $MNT/etc/systemd/system/${svc}.service
+          done
+          # network-online.target: mascherato così nessun servizio aspetta la rete
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/network-online.target
+          # network-wait-online (doppia sicurezza)
           sudo ln -sf /dev/null $MNT/etc/systemd/system/systemd-networkd-wait-online.service
           sudo ln -sf /dev/null $MNT/etc/systemd/system/NetworkManager-wait-online.service
           # apt-daily: aggiornamenti automatici non voluti su kiosk
@@ -142,7 +149,7 @@ jobs:
           sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily.timer
           sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily-upgrade.timer
           sudo ln -sf /dev/null $MNT/etc/systemd/system/unattended-upgrades.service
-          echo "✓ cloud-init disabilitato, network-wait e apt-daily mascherati"
+          echo "✓ cloud-init (4 servizi) mascherato, network-online.target mascherato, apt-daily mascherato"
 
           # ── Fix autologin: rileva utente reale (UID 1000) ──────────────
           KIOSK_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home/ {print $1; exit}' \
