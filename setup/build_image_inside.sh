@@ -319,7 +319,7 @@ chown -R pi:pi /home/pi/.config
 cat > /etc/issue << 'EOF'
 
   ┌─────────────────────────────────────────────┐
-  │   🎥   Camera Viewer v2.0                   │
+  │   🎥   Camera Viewer v2.2                   │
   │        di Enzo Pellegrino                   │
   │        http://\4                            │
   └─────────────────────────────────────────────┘
@@ -434,7 +434,7 @@ set color_highlight=black/cyan
 set menu_color_normal=white/black
 set menu_color_highlight=black/cyan
 
-echo "  Camera Viewer v2.0"
+echo "  Camera Viewer v2.2"
 echo "  di Enzo Pellegrino"
 
 menuentry " Avvia Camera Viewer" {

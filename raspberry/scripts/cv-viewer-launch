@@ -72,7 +72,7 @@ _show_ip_overlay() {
         local ap_ip="${ap_mode##*|}"
         content="echo ''
 echo '  ╔═══════════════════════════════════════════╗'
-echo '  ║   🎥  Camera Viewer v2.0                  ║'
+echo '  ║   🎥  Camera Viewer v2.2                  ║'
 echo '  ╠═══════════════════════════════════════════╣'
 echo '  ║  📡 Nessun ethernet — Hotspot WiFi attivo  ║'
 echo '  ║                                           ║'
@@ -86,7 +86,7 @@ sleep 60"
         # Modalità ethernet normale
         content="echo ''
 echo '  ╔═══════════════════════════════════════════╗'
-echo '  ║   🎥  Camera Viewer v2.0                  ║'
+echo '  ║   🎥  Camera Viewer v2.2                  ║'
 echo '  ║       di Enzo Pellegrino                  ║'
 echo '  ╠═══════════════════════════════════════════╣'
 echo '  ║   Portale:  http://${ip}          ║'
