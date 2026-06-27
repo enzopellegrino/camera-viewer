@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Camera Viewer v2.4 — Universal First Boot Setup
+# Camera Viewer v2.5 — Universal First Boot Setup
 # Creato da Enzo Pellegrino
 #
 # Output: schermata pulita sullo schermo, log dettagliato in /home/pi/setup-nuc.log
@@ -57,7 +57,7 @@ show_screen() {
     clear >&3
     echo "" >&3
     box_top
-    box_line "  🎥  Camera Viewer v2.4"
+    box_line "  🎥  Camera Viewer v2.5"
     box_line "      Creato da Enzo Pellegrino"
     box_sep
     box_empty
@@ -129,7 +129,7 @@ update-initramfs -u -k all 2>/dev/null || true
 cat > /etc/issue << 'EOF'
 
   ┌─────────────────────────────────────────────┐
-  │   🎥   Camera Viewer v2.4                   │
+  │   🎥   Camera Viewer v2.5                   │
   │        di Enzo Pellegrino                   │
   │        http://\4                            │
   └─────────────────────────────────────────────┘
