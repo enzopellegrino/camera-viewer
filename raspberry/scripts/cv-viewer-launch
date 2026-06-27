@@ -74,7 +74,7 @@ _show_ip_overlay() {
         # L'installatore deve recuperarla tramite SSH o etichetta fisica.
         content="echo ''
 echo '  ╔═══════════════════════════════════════════╗'
-echo '  ║   🎥  Camera Viewer v2.6                  ║'
+echo '  ║   🎥  Camera Viewer v2.7                  ║'
 echo '  ╠═══════════════════════════════════════════╣'
 echo '  ║  📡 Nessun ethernet — Hotspot WiFi attivo  ║'
 echo '  ║                                           ║'
@@ -88,7 +88,7 @@ sleep 60"
         # Modalità ethernet normale
         content="echo ''
 echo '  ╔═══════════════════════════════════════════╗'
-echo '  ║   🎥  Camera Viewer v2.6                  ║'
+echo '  ║   🎥  Camera Viewer v2.7                  ║'
 echo '  ║       di Enzo Pellegrino                  ║'
 echo '  ╠═══════════════════════════════════════════╣'
 echo '  ║   Portale:  http://${ip}          ║'
@@ -105,7 +105,7 @@ sleep 10"
               -geometry 55x8+0+0 \
               -e bash -c "echo ''
 echo '  ╔═══════════════════════════════════════════╗'
-echo '  ║   🎥  Camera Viewer v2.6                  ║'
+echo '  ║   🎥  Camera Viewer v2.7                  ║'
 echo '  ╠═══════════════════════════════════════════╣'
 echo '  ║   ⚠  Nessuna rete rilevata               ║'
 echo '  ║   Collega un cavo ethernet e riavvia      ║'

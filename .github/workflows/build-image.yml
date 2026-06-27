@@ -144,6 +144,8 @@ jobs:
           # network-wait-online (doppia sicurezza)
           sudo ln -sf /dev/null $MNT/etc/systemd/system/systemd-networkd-wait-online.service
           sudo ln -sf /dev/null $MNT/etc/systemd/system/NetworkManager-wait-online.service
+          # systemd-networkd: su Ubuntu 24.04 minimal può essere attivo insieme a NM → conflitti e wait
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/systemd-networkd.service
           # apt-daily: aggiornamenti automatici non voluti su kiosk
           sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily.service
           sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily-upgrade.service
@@ -242,6 +244,16 @@ jobs:
           grep -q '^GRUB_DISTRIBUTOR=' $MNT/etc/default/grub || \
             echo 'GRUB_DISTRIBUTOR="Camera Viewer"' | sudo tee -a $MNT/etc/default/grub
           echo "✓ /etc/default/grub: quiet splash + distributor Camera Viewer"
+
+          # ── FIX network wait: parametri kernel nel grub.cfg esistente ──────
+          # /etc/default/grub da solo non basta: update-grub non gira nel workflow.
+          # Patchiamo direttamente le righe 'linux ...' nel grub.cfg già generato.
+          # Parametri aggiunti:
+          #   cloud-init=disabled     → blocca cloud-init a livello kernel (più robusto di .disabled)
+          #   systemd.mask=...        → maschera servizi wait-online prima che systemd legga i file
+          EXTRA_PARAMS="cloud-init=disabled systemd.mask=NetworkManager-wait-online.service systemd.mask=systemd-networkd-wait-online.service systemd.mask=systemd-networkd.service"
+          sudo sed -i "s|^\(\s*linux\s.*root=LABEL=cv-system.*\)|\1 ${EXTRA_PARAMS}|" $MNT/boot/grub/grub.cfg
+          echo "✓ Kernel cmdline patchato in grub.cfg: $EXTRA_PARAMS"
 
           # ── Splash GRUB: immagine Camera Viewer by Enzo Pellegrino ─────
           sudo apt-get install -y imagemagick fonts-dejavu-core 2>/dev/null | tail -1
