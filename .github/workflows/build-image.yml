@@ -29,8 +29,15 @@ jobs:
 
       - name: Imposta variabili
         id: vars
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
         run: |
-          TAG="${{ github.event.inputs.release_tag }}"
+          TAG="$RELEASE_TAG"
+          # Valida formato: deve essere vX.Y o vX.Y.Z
+          if ! echo "$TAG" | grep -qE '^v[0-9]+(\.[0-9]+)+$'; then
+            echo "::error::Tag non valido: '$TAG' — usa formato vX.Y (es. v2.1)"
+            exit 1
+          fi
           VERSION="${TAG#v}"
           echo "tag=$TAG"          >> $GITHUB_OUTPUT
           echo "version=$VERSION"  >> $GITHUB_OUTPUT
@@ -180,13 +187,13 @@ jobs:
           echo "✓ camera-webconfig.service: Restart=always + utente $KIOSK_USER"
           echo "✓ lightdm: Restart=always"
 
-          # ── Hotspot WiFi fallback (file da repo) ───────────────────────
-          sudo cp tools/cv-hotspot.sh     $MNT/usr/local/bin/cv-hotspot.sh
-          sudo cp tools/cv-hotspot.service $MNT/etc/systemd/system/cv-hotspot.service
-          sudo chmod 755 $MNT/usr/local/bin/cv-hotspot.sh
-          sudo ln -sf /etc/systemd/system/cv-hotspot.service \
-            $MNT/etc/systemd/system/multi-user.target.wants/cv-hotspot.service
-          echo "✓ Hotspot WiFi fallback configurato (CameraViewer-XXXX / cameraviewer)"
+          # ── Hotspot WiFi: cv-hotspot.service rimosso ───────────────────
+          # cv-ap (gestito da cv-bootmode) è il gestore AP canonico con captive portal.
+          # cv-hotspot.service è rimosso per evitare conflitti: entrambi tenterebbero
+          # di portare su un AP sulla stessa interfaccia WiFi.
+          sudo rm -f $MNT/etc/systemd/system/multi-user.target.wants/cv-hotspot.service
+          sudo rm -f $MNT/etc/systemd/system/cv-hotspot.service
+          echo "✓ cv-hotspot.service rimosso (usa cv-ap + cv-bootmode)"
 
           # ── Boot silenzioso: quiet splash (niente testo che scorre) ────
           sudo sed -i \
@@ -244,7 +251,9 @@ jobs:
           # 1. Setup grafico: background Camera Viewer by Enzo Pellegrino
           # 2. Timeout 15s con menu visibile
           # 3. Voce installer
-          sudo tee -a $GRUB_CFG > /dev/null << EOF
+          # Nota: strip degli spazi iniziali per evitare problemi con parser GRUB
+          VERSION_TAG="${{ steps.vars.outputs.version }}"
+          cat << EOF | sed 's/^          //' | sudo tee -a $GRUB_CFG > /dev/null
 
           # ── Camera Viewer: grafica e timeout ──────────────────────────
           insmod all_video
@@ -260,9 +269,9 @@ jobs:
           set timeout_style=menu
           set timeout=15
 
-          menuentry "  Installa Camera Viewer v${{ steps.vars.outputs.version }} su disco interno" {
-              linux $KERNEL root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target
-              initrd $INITRD
+          menuentry "  Installa Camera Viewer v${VERSION_TAG} su disco interno" {
+              linux ${KERNEL} root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target
+              initrd ${INITRD}
           }
           EOF
           echo "✓ Menu GRUB: splash + timeout=15s + voce Installa aggiunti in fondo a grub.cfg"
@@ -280,8 +289,8 @@ jobs:
                 /usr/share/plymouth/themes/default.plymouth \
                 default.plymouth \
                 /usr/share/plymouth/themes/camera-viewer/camera-viewer.plymouth \
-                200 2>/dev/null || true
-            update-initramfs -u -k all 2>/dev/null || true
+                200 || true
+            update-initramfs -u -k all || true
             echo PLYMOUTH_OK
           " || echo "(Plymouth update opzionale — continuo)"
           for d in run sys proc dev/pts dev; do

@@ -21,6 +21,9 @@ echo "Setup utente kiosk: $KIOSK_USER  (home: $KIOSK_HOME)"
 LOG="$KIOSK_HOME/setup-nuc.log"
 START_TS=$(date +%s)
 
+# Se qualcosa va storto, mostra l'errore sullo schermo (non solo nel log)
+trap 'echo "" >&3; echo "  ❌  ERRORE al passo: ${BASH_COMMAND}" >&3; echo "  Vedi dettagli: $LOG  (Alt+F2)" >&3' ERR
+
 # Redirect tutto l'output verboso al log, non allo schermo
 exec 3>&1 4>&2        # salva stdout/stderr originali
 exec >> "$LOG" 2>&1   # tutto al log

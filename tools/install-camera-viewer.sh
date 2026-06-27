@@ -158,7 +158,8 @@ echo "  [5/6] Configurazione..."
 # Rileva utente desktop del sistema installato (primo con UID >= 1000)
 KIOSK_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home/ {print $1; exit}' \
     "$MNT/etc/passwd")
-KIOSK_HOME="/home/${KIOSK_USER:-ubuntu}"
+KIOSK_USER="${KIOSK_USER:-ubuntu}"   # fallback sicuro se /etc/passwd non ha utenti desktop
+KIOSK_HOME="/home/${KIOSK_USER}"
 echo "  Utente kiosk: $KIOSK_USER  (home: $KIOSK_HOME)"
 
 # fstab con UUID del nuovo disco
@@ -200,6 +201,13 @@ print('  Config creato.')
 "
 cp /tmp/cv-init-config.json "$MNT${KIOSK_HOME}/.config/camera-viewer/config.json"
 chown -R 1000:1000 "$MNT${KIOSK_HOME}/.config/camera-viewer/"
+
+# Patch camera-webconfig.service: sostituisci KIOSK_USER_PLACEHOLDER con l'utente reale
+if [ -f "$MNT/etc/systemd/system/camera-webconfig.service" ]; then
+    sed -i "s/KIOSK_USER_PLACEHOLDER/$KIOSK_USER/g" \
+        "$MNT/etc/systemd/system/camera-webconfig.service"
+    echo "  ✓ camera-webconfig.service: User → $KIOSK_USER"
+fi
 
 # Rimuovi il servizio installer dall'installazione finale
 # (non ha senso avere "Installa" nel GRUB del sistema già installato)

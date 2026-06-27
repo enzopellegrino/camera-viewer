@@ -14,8 +14,9 @@
 #
 # Uses absolute paths (NOT $HOME): the labwc autostart environment may not
 # export HOME, which previously made the force-setup check fail.
-# Usa $HOME se disponibile (sessione utente), altrimenti rileva da UID 1000
-_KIOSK_HOME="${HOME:-$(getent passwd 1000 | cut -d: -f6)}"
+# Usa $HOME se disponibile (sessione utente), altrimenti rileva il primo utente
+# con UID >= 1000 (coerente con cv-bootmode e install-camera-viewer.sh)
+_KIOSK_HOME="${HOME:-$(getent passwd | awk -F: '$3>=1000 && $3<65534 && $6~/^\/home/{print $6; exit}')}"
 _KIOSK_HOME="${_KIOSK_HOME:-/home/ubuntu}"
 CFG_DIR="${_KIOSK_HOME}/.config/camera-viewer"
 # Native X11 session (rpd-x via lightdm). No XWayland overhead.

@@ -1,7 +1,9 @@
 [Unit]
 Description=Camera Viewer - boot mode selector (provisioning vs operational)
-After=NetworkManager.service camera-webconfig.service
+After=NetworkManager.service
 Wants=NetworkManager.service
+# AP deve essere attivo PRIMA che il portale web inizi a servire richieste
+Before=camera-webconfig.service
 
 [Service]
 Type=oneshot
