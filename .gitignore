@@ -11,6 +11,7 @@ dist/
 license_private.pem
 tools/private_key.pem
 tools/generate_license.py
+tools/licenses-log.json
 
 # macOS
 .DS_Store
