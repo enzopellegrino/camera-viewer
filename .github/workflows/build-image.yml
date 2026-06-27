@@ -101,6 +101,96 @@ jobs:
             $MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service
           echo "✓ Servizio systemd abilitato"
 
+          # ── Fix: network-wait-online non blocca il boot senza rete ────
+          # Maschera entrambi i wait-online (networkd + NetworkManager)
+          # Su kiosk senza ethernet il default può bloccare 2 minuti
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/systemd-networkd-wait-online.service
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/NetworkManager-wait-online.service 2>/dev/null || true
+          echo "✓ network-wait-online mascherato"
+
+          # ── Hotspot WiFi fallback ──────────────────────────────────────
+          # Se al boot non c'è rete (né ethernet né WiFi configurato),
+          # crea un access point con SSID "CameraViewer-XXXX" / "cameraviewer"
+          # così l'utente si connette e accede al portale su http://10.42.0.1
+          sudo tee $MNT/usr/local/bin/cv-hotspot.sh > /dev/null << 'HOTSPOT'
+#!/bin/bash
+# Camera Viewer — WiFi Hotspot Fallback
+LOG="/var/log/cv-hotspot.log"
+exec >> "$LOG" 2>&1
+echo "$(date '+%F %T') — cv-hotspot avviato"
+
+# Aspetta che NetworkManager sia pronto
+sleep 12
+
+# Se c'è già una connessione attiva (ethernet o wifi), esci
+CONNECTED=$(nmcli -t -f TYPE,STATE connection show --active 2>/dev/null \
+    | grep -v "^loopback:" | grep ":activated" | head -1)
+if [ -n "$CONNECTED" ]; then
+    echo "$(date '+%F %T') — Rete attiva ($CONNECTED), hotspot non necessario"
+    exit 0
+fi
+
+# Trova interfaccia WiFi
+WIFI_IF=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null \
+    | grep ":wifi" | cut -d: -f1 | head -1)
+if [ -z "$WIFI_IF" ]; then
+    echo "$(date '+%F %T') — Nessuna interfaccia WiFi trovata"
+    exit 1
+fi
+
+# SSID: CameraViewer + ultime 4 cifre del MAC (es. CameraViewer-A3F2)
+MAC=$(cat /sys/class/net/"$WIFI_IF"/address 2>/dev/null | tr -d ':')
+SUFFIX=$(echo "${MAC: -4}" | tr '[:lower:]' '[:upper:]')
+SSID="CameraViewer-${SUFFIX}"
+PASSWORD="cameraviewer"
+
+echo "$(date '+%F %T') — Avvio hotspot: SSID=$SSID su $WIFI_IF"
+nmcli connection delete "cv-hotspot" 2>/dev/null || true
+
+nmcli device wifi hotspot \
+    ifname "$WIFI_IF" \
+    ssid "$SSID" \
+    password "$PASSWORD" \
+    con-name "cv-hotspot"
+
+if [ $? -eq 0 ]; then
+    # NetworkManager assegna 10.42.0.1 come IP default per hotspot
+    IP=$(ip -4 addr show "$WIFI_IF" 2>/dev/null \
+        | grep -oP '(?<=inet )\d+\.\d+\.\d+\.\d+' | head -1)
+    IP="${IP:-10.42.0.1}"
+    echo "$(date '+%F %T') — Hotspot attivo: $SSID / $PASSWORD @ $IP"
+    # Salva info per il kiosk (mostra SSID/IP sullo schermo)
+    printf '{"ssid":"%s","password":"%s","ip":"%s","portal":"http://%s"}\n' \
+        "$SSID" "$PASSWORD" "$IP" "$IP" \
+        > /run/cv-network-info.json
+else
+    echo "$(date '+%F %T') — Errore avvio hotspot (nmcli ha fallito)"
+    exit 1
+fi
+HOTSPOT
+          sudo chmod 755 $MNT/usr/local/bin/cv-hotspot.sh
+
+          sudo tee $MNT/etc/systemd/system/cv-hotspot.service > /dev/null << 'EOF'
+[Unit]
+Description=Camera Viewer WiFi Hotspot Fallback
+After=NetworkManager.service network.target
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cv-hotspot.sh
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+          sudo mkdir -p $MNT/etc/systemd/system/multi-user.target.wants
+          sudo ln -sf /etc/systemd/system/cv-hotspot.service \
+            $MNT/etc/systemd/system/multi-user.target.wants/cv-hotspot.service
+          echo "✓ Hotspot WiFi fallback configurato (CameraViewer-XXXX / cameraviewer)"
+
           # ── GRUB: leggi kernel e initrd dal grub.cfg esistente ───────
           GRUB_CFG=$MNT/boot/grub/grub.cfg
 
