@@ -6,14 +6,14 @@
 # Il PC NON ha bisogno di hard disk — gira tutto dalla USB.
 #
 # Uso:
-#   bash make-usb.sh [/dev/diskX] [camera-viewer-v2.2.img.xz]
+#   bash make-usb.sh [/dev/diskX] [camera-viewer-v2.3.img.xz]
 #
 # Requisiti: macOS, curl (solo per download automatico se non hai l'immagine)
 # =============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEFAULT_IMG="$SCRIPT_DIR/dist/camera-viewer-v2.2.img.xz"
+DEFAULT_IMG="$SCRIPT_DIR/dist/camera-viewer-v2.3.img.xz"
 
 # Colori
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
