@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Tag della release (es. v2.0)'
+        description: 'Tag della release (es. v2.1)'
         required: true
-        default: 'v2.0'
+        default: 'v2.1'
 
 permissions:
   contents: write
@@ -37,14 +37,35 @@ jobs:
           echo "Tag: $TAG  |  Versione: $VERSION"
           df -h .
 
+      # ── Crea release se non esiste ────────────────────────────────────────────
+      - name: Crea release se non esiste
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${{ steps.vars.outputs.tag }}
+          VERSION=${{ steps.vars.outputs.version }}
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "Camera Viewer v${VERSION}" \
+              --notes "$(printf '## Camera Viewer v%s\n\n### Novità\n- Splash GRUB con branding Camera Viewer by Enzo Pellegrino\n- Hotspot WiFi automatico (CameraViewer-XXXX / cameraviewer) quando non c'\''è rete\n- Boot silenzioso: nessun testo che scorre all'\''avvio\n- Menu GRUB con countdown 15s\n\n### Come flashare su USB\n```bash\nbash make-usb.sh /dev/diskX\n```\no con Balena Etcher → `camera-viewer-%s.img.xz`' "$VERSION" "$TAG")"
+            echo "✓ Release $TAG creata"
+          else
+            echo "✓ Release $TAG già esistente"
+          fi
+
       # ── Download immagine base ─────────────────────────────────────────────
       - name: Download immagine base dalla release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release download ${{ steps.vars.outputs.tag }} \
-            --pattern "camera-viewer-base.img.xz" \
-            --dir /tmp
+          TAG=${{ steps.vars.outputs.tag }}
+          # Prova prima il tag corrente, fallback a v2.0 (contiene la base NUC)
+          if ! gh release download "$TAG" \
+              --pattern "camera-viewer-base.img.xz" --dir /tmp 2>/dev/null; then
+            echo "Base non trovata in $TAG — scarico da v2.0 come fallback"
+            gh release download v2.0 \
+              --pattern "camera-viewer-base.img.xz" --dir /tmp
+          fi
           ls -lh /tmp/camera-viewer-base.img.xz
 
       # ── Decomprimi ────────────────────────────────────────────────────────
@@ -102,94 +123,52 @@ jobs:
           echo "✓ Servizio systemd abilitato"
 
           # ── Fix: network-wait-online non blocca il boot senza rete ────
-          # Maschera entrambi i wait-online (networkd + NetworkManager)
-          # Su kiosk senza ethernet il default può bloccare 2 minuti
           sudo ln -sf /dev/null $MNT/etc/systemd/system/systemd-networkd-wait-online.service
           sudo ln -sf /dev/null $MNT/etc/systemd/system/NetworkManager-wait-online.service 2>/dev/null || true
           echo "✓ network-wait-online mascherato"
 
-          # ── Hotspot WiFi fallback ──────────────────────────────────────
-          # Se al boot non c'è rete (né ethernet né WiFi configurato),
-          # crea un access point con SSID "CameraViewer-XXXX" / "cameraviewer"
-          # così l'utente si connette e accede al portale su http://10.42.0.1
-          sudo tee $MNT/usr/local/bin/cv-hotspot.sh > /dev/null << 'HOTSPOT'
-#!/bin/bash
-# Camera Viewer — WiFi Hotspot Fallback
-LOG="/var/log/cv-hotspot.log"
-exec >> "$LOG" 2>&1
-echo "$(date '+%F %T') — cv-hotspot avviato"
-
-# Aspetta che NetworkManager sia pronto
-sleep 12
-
-# Se c'è già una connessione attiva (ethernet o wifi), esci
-CONNECTED=$(nmcli -t -f TYPE,STATE connection show --active 2>/dev/null \
-    | grep -v "^loopback:" | grep ":activated" | head -1)
-if [ -n "$CONNECTED" ]; then
-    echo "$(date '+%F %T') — Rete attiva ($CONNECTED), hotspot non necessario"
-    exit 0
-fi
-
-# Trova interfaccia WiFi
-WIFI_IF=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null \
-    | grep ":wifi" | cut -d: -f1 | head -1)
-if [ -z "$WIFI_IF" ]; then
-    echo "$(date '+%F %T') — Nessuna interfaccia WiFi trovata"
-    exit 1
-fi
-
-# SSID: CameraViewer + ultime 4 cifre del MAC (es. CameraViewer-A3F2)
-MAC=$(cat /sys/class/net/"$WIFI_IF"/address 2>/dev/null | tr -d ':')
-SUFFIX=$(echo "${MAC: -4}" | tr '[:lower:]' '[:upper:]')
-SSID="CameraViewer-${SUFFIX}"
-PASSWORD="cameraviewer"
-
-echo "$(date '+%F %T') — Avvio hotspot: SSID=$SSID su $WIFI_IF"
-nmcli connection delete "cv-hotspot" 2>/dev/null || true
-
-nmcli device wifi hotspot \
-    ifname "$WIFI_IF" \
-    ssid "$SSID" \
-    password "$PASSWORD" \
-    con-name "cv-hotspot"
-
-if [ $? -eq 0 ]; then
-    # NetworkManager assegna 10.42.0.1 come IP default per hotspot
-    IP=$(ip -4 addr show "$WIFI_IF" 2>/dev/null \
-        | grep -oP '(?<=inet )\d+\.\d+\.\d+\.\d+' | head -1)
-    IP="${IP:-10.42.0.1}"
-    echo "$(date '+%F %T') — Hotspot attivo: $SSID / $PASSWORD @ $IP"
-    # Salva info per il kiosk (mostra SSID/IP sullo schermo)
-    printf '{"ssid":"%s","password":"%s","ip":"%s","portal":"http://%s"}\n' \
-        "$SSID" "$PASSWORD" "$IP" "$IP" \
-        > /run/cv-network-info.json
-else
-    echo "$(date '+%F %T') — Errore avvio hotspot (nmcli ha fallito)"
-    exit 1
-fi
-HOTSPOT
+          # ── Hotspot WiFi fallback (file da repo) ───────────────────────
+          sudo cp tools/cv-hotspot.sh     $MNT/usr/local/bin/cv-hotspot.sh
+          sudo cp tools/cv-hotspot.service $MNT/etc/systemd/system/cv-hotspot.service
           sudo chmod 755 $MNT/usr/local/bin/cv-hotspot.sh
-
-          sudo tee $MNT/etc/systemd/system/cv-hotspot.service > /dev/null << 'EOF'
-[Unit]
-Description=Camera Viewer WiFi Hotspot Fallback
-After=NetworkManager.service network.target
-Wants=NetworkManager.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/cv-hotspot.sh
-RemainAfterExit=yes
-Restart=on-failure
-RestartSec=30
-
-[Install]
-WantedBy=multi-user.target
-EOF
           sudo mkdir -p $MNT/etc/systemd/system/multi-user.target.wants
           sudo ln -sf /etc/systemd/system/cv-hotspot.service \
             $MNT/etc/systemd/system/multi-user.target.wants/cv-hotspot.service
           echo "✓ Hotspot WiFi fallback configurato (CameraViewer-XXXX / cameraviewer)"
+
+          # ── Boot silenzioso: quiet splash (niente testo che scorre) ────
+          sudo sed -i \
+            's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"/' \
+            $MNT/etc/default/grub
+          grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' $MNT/etc/default/grub || \
+            echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"' | sudo tee -a $MNT/etc/default/grub
+          sudo sed -i \
+            's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="Camera Viewer"/' \
+            $MNT/etc/default/grub
+          grep -q '^GRUB_DISTRIBUTOR=' $MNT/etc/default/grub || \
+            echo 'GRUB_DISTRIBUTOR="Camera Viewer"' | sudo tee -a $MNT/etc/default/grub
+          echo "✓ /etc/default/grub: quiet splash + distributor Camera Viewer"
+
+          # ── Splash GRUB: immagine Camera Viewer by Enzo Pellegrino ─────
+          sudo apt-get install -y imagemagick fonts-dejavu-core 2>/dev/null | tail -1
+          FONT_BOLD="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+          FONT_REG="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+          convert -size 1920x1080 \
+            -define gradient:angle=150 gradient:'#060d1a-#0e2040' \
+            -fill '#1a7fd4' \
+            -font "$FONT_BOLD" -pointsize 100 \
+            -gravity Center -annotate 0x0+0-110 'Camera Viewer' \
+            -fill '#4da6ff' \
+            -font "$FONT_REG" -pointsize 38 \
+            -gravity Center -annotate 0x0+0+20 'by Enzo Pellegrino' \
+            -fill '#3a5070' \
+            -font "$FONT_REG" -pointsize 24 \
+            -gravity South -annotate 0x0+0+40 \
+            'Usa le frecce per navigare · Invio per selezionare' \
+            /tmp/cv-grub-bg.png 2>/dev/null \
+          || convert -size 1920x1080 xc:'#060d1a' /tmp/cv-grub-bg.png
+          sudo cp /tmp/cv-grub-bg.png $MNT/boot/grub/cv-grub-bg.png
+          echo "✓ Splash GRUB generata (1920x1080)"
 
           # ── GRUB: leggi kernel e initrd dal grub.cfg esistente ───────
           GRUB_CFG=$MNT/boot/grub/grub.cfg
@@ -209,21 +188,32 @@ EOF
             exit 1
           fi
 
-          # Aggiungi in fondo a grub.cfg:
-          # - timeout=15 e style=menu (override sicuro — GRUB usa l'ultima assegnazione)
-          # - voce installer
+          # Aggiungi in fondo a grub.cfg (GRUB usa l'ultima assegnazione → override sicuro):
+          # 1. Setup grafico: background Camera Viewer by Enzo Pellegrino
+          # 2. Timeout 15s con menu visibile
+          # 3. Voce installer
           sudo tee -a $GRUB_CFG > /dev/null << EOF
 
-          # ── Camera Viewer: override timeout per mostrare il menu ──────
+          # ── Camera Viewer: grafica e timeout ──────────────────────────
+          insmod all_video
+          insmod gfxterm
+          insmod png
+          set gfxmode=auto
+          set gfxpayload=keep
+          terminal_output gfxterm
+          background_image /boot/grub/cv-grub-bg.png
+          set menu_color_normal=white/black
+          set menu_color_highlight=black/white
+
           set timeout_style=menu
           set timeout=15
 
           menuentry "  Installa Camera Viewer v${{ steps.vars.outputs.version }} su disco interno" {
-              linux $KERNEL root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target quiet
+              linux $KERNEL root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target quiet splash
               initrd $INITRD
           }
           EOF
-          echo "✓ Menu GRUB: timeout=15s + voce Installa aggiunti in fondo a grub.cfg"
+          echo "✓ Menu GRUB: splash + timeout=15s + voce Installa aggiunti in fondo a grub.cfg"
 
           # ── Smonta ────────────────────────────────────────────────────
           sudo umount $MNT/boot/efi
@@ -234,23 +224,33 @@ EOF
       # ── Ricomprimi ────────────────────────────────────────────────────────
       - name: Ricompressione immagine
         run: |
+          TAG=${{ steps.vars.outputs.tag }}
           echo "Compressione xz -6 in corso (~5 min)..."
+          # Copia prima il .img per l'upload non compresso (Etcher-friendly)
+          cp /tmp/camera-viewer-base.img "camera-viewer-${TAG}.img"
           xz -6 -T0 /tmp/camera-viewer-base.img
-          OUTPUT="camera-viewer-${{ steps.vars.outputs.tag }}.img.xz"
-          mv /tmp/camera-viewer-base.img.xz "$OUTPUT"
-          ls -lh "$OUTPUT"
+          mv /tmp/camera-viewer-base.img.xz "camera-viewer-${TAG}.img.xz"
+          ls -lh "camera-viewer-${TAG}.img.xz" "camera-viewer-${TAG}.img"
+          df -h .
 
       # ── Pubblica ──────────────────────────────────────────────────────────
       - name: Carica immagine sulla release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          OUTPUT="camera-viewer-${{ steps.vars.outputs.tag }}.img.xz"
-          gh release upload ${{ steps.vars.outputs.tag }} "$OUTPUT" --clobber
+          TAG=${{ steps.vars.outputs.tag }}
+          IMG_XZ="camera-viewer-${TAG}.img.xz"
+          IMG_RAW="camera-viewer-${TAG}.img"
+
+          # .img.xz — compresso, per dd e per chi ha poco spazio
+          gh release upload "$TAG" "$IMG_XZ" --clobber
+          # .img — non compresso, Balena Etcher lo legge direttamente
+          gh release upload "$TAG" "$IMG_RAW" --clobber
+
           echo ""
-          echo "✅ Immagine pubblicata:"
-          echo "   $(ls -lh $OUTPUT | awk '{print $5, $9}')"
+          echo "✅ Immagini pubblicate su release $TAG:"
+          echo "   $(ls -lh $IMG_XZ | awk '{print $5, $9}')  ← dd / macOS"
+          echo "   $(ls -lh $IMG_RAW | awk '{print $5, $9}')  ← Balena Etcher"
           echo ""
-          echo "Per flashare su USB:"
-          echo "   bash make-usb.sh /dev/diskX"
-          echo "   oppure Balena Etcher → $OUTPUT"
+          echo "Balena Etcher → scegli camera-viewer-${TAG}.img"
+          echo "dd (macOS)    → xz -dc $IMG_XZ | sudo dd of=/dev/rdiskX bs=1m"
