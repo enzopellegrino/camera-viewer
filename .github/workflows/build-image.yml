@@ -209,7 +209,7 @@ jobs:
           set timeout=15
 
           menuentry "  Installa Camera Viewer v${{ steps.vars.outputs.version }} su disco interno" {
-              linux $KERNEL root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target quiet splash
+              linux $KERNEL root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target
               initrd $INITRD
           }
           EOF
