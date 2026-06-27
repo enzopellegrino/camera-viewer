@@ -226,11 +226,9 @@ jobs:
         run: |
           TAG=${{ steps.vars.outputs.tag }}
           echo "Compressione xz -6 in corso (~5 min)..."
-          # Copia prima il .img per l'upload non compresso (Etcher-friendly)
-          cp /tmp/camera-viewer-base.img "camera-viewer-${TAG}.img"
           xz -6 -T0 /tmp/camera-viewer-base.img
           mv /tmp/camera-viewer-base.img.xz "camera-viewer-${TAG}.img.xz"
-          ls -lh "camera-viewer-${TAG}.img.xz" "camera-viewer-${TAG}.img"
+          ls -lh "camera-viewer-${TAG}.img.xz"
           df -h .
 
       # ── Pubblica ──────────────────────────────────────────────────────────
@@ -240,17 +238,14 @@ jobs:
         run: |
           TAG=${{ steps.vars.outputs.tag }}
           IMG_XZ="camera-viewer-${TAG}.img.xz"
-          IMG_RAW="camera-viewer-${TAG}.img"
 
-          # .img.xz — compresso, per dd e per chi ha poco spazio
+          # Solo .img.xz (Balena Etcher lo apre direttamente, dd/macOS pure)
+          # Il .img raw pesa ~11 GB — supera il limite GitHub di 2 GB per asset
           gh release upload "$TAG" "$IMG_XZ" --clobber
-          # .img — non compresso, Balena Etcher lo legge direttamente
-          gh release upload "$TAG" "$IMG_RAW" --clobber
 
           echo ""
-          echo "✅ Immagini pubblicate su release $TAG:"
-          echo "   $(ls -lh $IMG_XZ | awk '{print $5, $9}')  ← dd / macOS"
-          echo "   $(ls -lh $IMG_RAW | awk '{print $5, $9}')  ← Balena Etcher"
+          echo "✅ Immagine pubblicata su release $TAG:"
+          echo "   $(ls -lh $IMG_XZ | awk '{print $5, $9}')"
           echo ""
-          echo "Balena Etcher → scegli camera-viewer-${TAG}.img"
+          echo "Balena Etcher → apri camera-viewer-${TAG}.img.xz direttamente"
           echo "dd (macOS)    → xz -dc $IMG_XZ | sudo dd of=/dev/rdiskX bs=1m"
