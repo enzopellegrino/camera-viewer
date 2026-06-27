@@ -581,7 +581,7 @@ mkdir -p /target/boot/efi/EFI/BOOT
 grub-mkstandalone \
     --format=x86_64-efi \
     --output=/target/boot/efi/EFI/BOOT/BOOTX64.EFI \
-    --modules="part_gpt part_msdos fat ext2 normal boot linux initrd search search_label echo all_video video_fb" \
+    --modules="part_gpt part_msdos fat ext2 normal boot linux search search_label echo all_video video_fb" \
     --locales="" \
     --fonts="" \
     "boot/grub/grub.cfg=/tmp/grub-standalone.cfg"
