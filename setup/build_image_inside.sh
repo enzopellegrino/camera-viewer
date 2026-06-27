@@ -270,7 +270,16 @@ ln -sf /dev/null /etc/systemd/system/apt-daily.timer
 ln -sf /dev/null /etc/systemd/system/apt-daily-upgrade.timer
 # unattended-upgrades: upgrade automatici (non voluti su kiosk)
 ln -sf /dev/null /etc/systemd/system/unattended-upgrades.service
-echo "✓ Servizi network-wait e apt-daily mascherati"
+# network-online.target: nessun servizio attende la rete durante il boot
+ln -sf /dev/null /etc/systemd/system/network-online.target
+# systemd-networkd: conflitti con NM su Ubuntu 24.04 minimal
+ln -sf /dev/null /etc/systemd/system/systemd-networkd.service
+# cloud-init: non installato, ma mask precauzionale
+mkdir -p /etc/cloud && touch /etc/cloud/cloud-init.disabled
+for svc in cloud-init cloud-init-local cloud-config cloud-final; do
+    ln -sf /dev/null /etc/systemd/system/${svc}.service
+done
+echo "✓ Servizi network-wait, apt-daily, network-online.target, cloud-init mascherati"
 
 echo "Pacchetti installati."
 CHROOT
@@ -301,14 +310,14 @@ cd /home/pi/camera-viewer || exit 0
 # Python venv
 # venv — PySide6 va installato via pip (non è in apt Ubuntu 24.04)
 # Cache pip → /output (montato dalla VM che ha 43GB liberi)
-export PIP_CACHE_DIR=/output/pip-cache
-mkdir -p /output/pip-cache
+export PIP_CACHE_DIR=/tmp/pip-cache
+mkdir -p /tmp/pip-cache
 sudo -H -u pi python3 -m venv .venv
 sudo -H -u pi .venv/bin/pip install --upgrade pip -q
 sudo -H -u pi .venv/bin/pip install -r requirements.txt -q \
-    --cache-dir /output/pip-cache
+    --cache-dir /tmp/pip-cache
 sudo -H -u pi .venv/bin/pip install flask -q \
-    --cache-dir /output/pip-cache
+    --cache-dir /tmp/pip-cache
 
 # Script di sistema
 [ -f raspberry/scripts/cv-mode ] && \
@@ -339,6 +348,8 @@ chmod +x /usr/local/bin/pcmanfm
 [ -f raspberry/systemd/camera-webconfig.service ] && \
     install -m 644 raspberry/systemd/camera-webconfig.service \
         /etc/systemd/system/camera-webconfig.service && \
+    sed -i "s/KIOSK_USER_PLACEHOLDER/pi/g" \
+        /etc/systemd/system/camera-webconfig.service && \
     systemctl enable camera-webconfig
 [ -f raspberry/systemd/camera-bootmode.service ] && \
     install -m 644 raspberry/systemd/camera-bootmode.service \
@@ -359,6 +370,37 @@ chmod +x /usr/local/bin/pcmanfm
         /etc/systemd/system/camera-network-mode.service && \
     systemctl enable camera-network-mode
 
+# Installer su disco: copiato nell'immagine così l'rsync lo porta sul disco installato
+[ -f tools/install-camera-viewer.sh ] && \
+    install -m 755 tools/install-camera-viewer.sh \
+        /usr/local/bin/install-camera-viewer.sh && \
+    echo "✓ install-camera-viewer.sh installato"
+
+# cv-installer.service: avvia l'installer quando cv_install=1 nel cmdline kernel
+cat > /etc/systemd/system/cv-installer.service << 'SVCEOF'
+[Unit]
+Description=Camera Viewer Installer
+ConditionKernelCommandLine=cv_install=1
+After=local-fs.target
+DefaultDependencies=no
+Conflicts=camera-bootmode.service camera-webconfig.service lightdm.service
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/chvt 1
+ExecStart=/usr/local/bin/install-camera-viewer.sh
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+systemctl enable cv-installer
+echo "✓ cv-installer.service abilitato"
+
 # Installa iptables per captive portal redirect in AP mode
 apt-get install -y -q --no-install-recommends iptables 2>/dev/null || true
 
@@ -370,6 +412,17 @@ autologin-user=pi
 autologin-user-timeout=0
 user-session=openbox
 EOF
+
+# PAM autologin: sufficient + pam_permit fallback.
+# pam_succeed_if.so verifica che pi sia nel gruppo nopasswdlogin.
+# pam_permit.so garantisce autologin kiosk anche in caso di fallback.
+printf '#%%PAM-1.0\nauth    required   pam_env.so readenv=1 user_readenv=0\nauth    sufficient pam_succeed_if.so user ingroup nopasswdlogin\nauth    required   pam_permit.so\n@include common-account\n@include common-session\n' \
+  > /etc/pam.d/lightdm-autologin
+
+# LightDM watchdog: riavvia automaticamente se crasha
+mkdir -p /etc/systemd/system/lightdm.service.d
+printf '[Service]\nRestart=always\nRestartSec=5\n' \
+  > /etc/systemd/system/lightdm.service.d/restart.conf
 
 # Openbox sessione
 cat > /usr/share/xsessions/openbox.desktop << 'EOF'
@@ -501,22 +554,22 @@ info "Initrd: $INITRD"
 
 # grub.cfg con kernel reale
 cat > /tmp/grub-standalone.cfg << EOF
-set timeout=8
+set timeout=15
 set default=0
-set color_normal=cyan/black
-set color_highlight=black/cyan
 set menu_color_normal=white/black
-set menu_color_highlight=black/cyan
+set menu_color_highlight=black/white
 
-echo "  Camera Viewer v${VERSION}"
-echo "  di Enzo Pellegrino"
-
-menuentry " Avvia Camera Viewer" {
+menuentry "  Installa Camera Viewer v${VERSION} su disco interno" {
+    search --no-floppy --label --set=root cv-system
+    linux  ${KERNEL} root=LABEL=cv-system rw quiet loglevel=3 cv_install=1 systemd.unit=multi-user.target
+    initrd ${INITRD}
+}
+menuentry "  Avvia Camera Viewer (senza installare)" {
     search --no-floppy --label --set=root cv-system
     linux  ${KERNEL} root=LABEL=cv-system rw quiet loglevel=3
     initrd ${INITRD}
 }
-menuentry " Modalita sicura (nomodeset)" {
+menuentry "  Modalita sicura (nomodeset)" {
     search --no-floppy --label --set=root cv-system
     linux  ${KERNEL} root=LABEL=cv-system rw nomodeset loglevel=3
     initrd ${INITRD}

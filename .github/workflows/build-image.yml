@@ -1,20 +1,24 @@
-name: Build Distributable Image
+name: Build Image from Scratch
 
-# Scarica l'immagine base dalla release, aggiunge il menu installer (GRUB),
-# ricomprime e carica il file finale sulla stessa release.
+# Costruisce l'immagine USB Camera Viewer completamente da zero in CI.
+# Usa debootstrap + setup/build_image_inside.sh — nessuna dipendenza da
+# un "base image" pre-costruito sul PC. Tutto è nel repo.
 #
-# Prerequisito: la release deve contenere "camera-viewer-base.img.xz"
-# (immagine prodotta da make-image.sh sul NUC, senza installer).
+# Output: camera-viewer-vX.Y.img.xz caricato sulla release GitHub.
 #
-# Output: "camera-viewer-vX.Y.img.xz" caricato sulla stessa release.
+# Stima tempi:
+#   debootstrap + apt:  15-20 min
+#   pip (PySide6):       5-10 min
+#   compressione xz:     5-10 min
+#   totale:             ~35-45 min
 
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: 'Tag della release (es. v2.1)'
+      version:
+        description: 'Versione (es. 3.0)'
         required: true
-        default: 'v2.1'
+        default: '3.0'
 
 permissions:
   contents: write
@@ -22,377 +26,96 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
+      # ── Libera spazio disco ────────────────────────────────────────────────
+      # ubuntu-latest ha ~14GB liberi di default; rimuovendo tool non usati
+      # arriviamo a ~30GB — necessario per immagine raw 6GB + build artifacts.
+      - name: Libera spazio disco
+        run: |
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost \
+            /usr/share/swift \
+            2>/dev/null || true
+          df -h .
+
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Imposta variabili
-        id: vars
-        env:
-          RELEASE_TAG: ${{ github.event.inputs.release_tag }}
+      # ── Strumenti build ────────────────────────────────────────────────────
+      - name: Installa strumenti build
         run: |
-          TAG="$RELEASE_TAG"
-          # Valida formato: deve essere vX.Y o vX.Y.Z
-          if ! echo "$TAG" | grep -qE '^v[0-9]+(\.[0-9]+)+$'; then
-            echo "::error::Tag non valido: '$TAG' — usa formato vX.Y (es. v2.1)"
-            exit 1
-          fi
-          VERSION="${TAG#v}"
-          echo "tag=$TAG"          >> $GITHUB_OUTPUT
-          echo "version=$VERSION"  >> $GITHUB_OUTPUT
-          echo "Tag: $TAG  |  Versione: $VERSION"
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends \
+            debootstrap parted dosfstools e2fsprogs \
+            grub-efi-amd64-bin grub-efi-amd64 grub2-common \
+            xz-utils rsync
+          echo "✓ Strumenti build installati"
           df -h .
 
-      # ── Crea release se non esiste ────────────────────────────────────────────
+      # ── Tarball app ────────────────────────────────────────────────────────
+      # Crea un archivio con l'intero repo (escludi cache, build, immagini).
+      # build_image_inside.sh lo estrae in /home/pi/camera-viewer/ sull'immagine.
+      - name: Crea tarball app
+        run: |
+          tar czf /tmp/camera-viewer-app.tar.gz \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.venv' \
+            --exclude='dist' \
+            --exclude='build' \
+            --exclude='*.xz' \
+            --exclude='*.img' \
+            --exclude='*.img.gz' \
+            -C . .
+          ls -lh /tmp/camera-viewer-app.tar.gz
+          echo "✓ Tarball app creato"
+
+      # ── Build immagine da zero ─────────────────────────────────────────────
+      # Esegue build_image_inside.sh come root (richiede losetup, mount, chroot).
+      # GitHub Actions ubuntu-latest supporta tutti questi comandi natively.
+      - name: Build immagine da zero
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          sudo bash setup/build_image_inside.sh \
+            "$VERSION" \
+            /tmp/cv-output \
+            /tmp/camera-viewer-app.tar.gz
+          echo ""
+          ls -lh /tmp/cv-output/
+          df -h .
+
+      # ── Crea release e pubblica ────────────────────────────────────────────
       - name: Crea release se non esiste
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=${{ steps.vars.outputs.tag }}
-          VERSION=${{ steps.vars.outputs.version }}
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="v${VERSION}"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --title "Camera Viewer v${VERSION}" \
-              --notes "$(printf '## Camera Viewer v%s\n\n### Novità\n- Splash GRUB con branding Camera Viewer by Enzo Pellegrino\n- Hotspot WiFi automatico (CameraViewer-XXXX / cameraviewer) quando non c'\''è rete\n- Boot silenzioso: nessun testo che scorre all'\''avvio\n- Menu GRUB con countdown 15s\n\n### Come flashare su USB\n```bash\nbash make-usb.sh /dev/diskX\n```\no con Balena Etcher → `camera-viewer-%s.img.xz`' "$VERSION" "$TAG")"
+              --notes "$(printf '## Camera Viewer v%s\n\n### Come installare\n1. Scarica `camera-viewer-%s.img.xz`\n2. Scrivi su USB con Balena Etcher o:\n   ```bash\n   xz -dc camera-viewer-%s.img.xz | sudo dd of=/dev/rdiskX bs=4m\n   ```\n3. Boota il PC dalla USB\n4. Seleziona **Installa Camera Viewer su disco interno**\n5. Digita `INSTALLA` e attendi\n6. Rimuovi la USB → il PC riavvia dal disco\n\n### Primo accesso portale\n- URL: mostrato sullo schermo dopo il boot\n- Login: `admin` / `admin` (cambia subito!)' \
+                "$VERSION" "$TAG" "$TAG")"
             echo "✓ Release $TAG creata"
           else
             echo "✓ Release $TAG già esistente"
           fi
 
-      # ── Download immagine base ─────────────────────────────────────────────
-      - name: Download immagine base dalla release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG=${{ steps.vars.outputs.tag }}
-          # Prova prima il tag corrente, fallback a v2.0 (contiene la base NUC)
-          if ! gh release download "$TAG" \
-              --pattern "camera-viewer-base.img.xz" --dir /tmp 2>/dev/null; then
-            echo "Base non trovata in $TAG — scarico da v2.0 come fallback"
-            gh release download v2.0 \
-              --pattern "camera-viewer-base.img.xz" --dir /tmp
-          fi
-          ls -lh /tmp/camera-viewer-base.img.xz
-
-      # ── Decomprimi ────────────────────────────────────────────────────────
-      - name: Decompressione immagine
-        run: |
-          echo "Decompressione in corso..."
-          xz -d -T0 /tmp/camera-viewer-base.img.xz
-          ls -lh /tmp/camera-viewer-base.img
-          df -h .
-
-      # ── Monta e modifica ──────────────────────────────────────────────────
-      - name: Monta immagine e aggiungi installer
-        run: |
-          IMG=/tmp/camera-viewer-base.img
-          MNT=/mnt/cv-img
-
-          LOOP=$(sudo losetup -f --show -P "$IMG")
-          echo "Loop device: $LOOP"
-
-          sudo mkdir -p $MNT
-          sudo mount ${LOOP}p2 $MNT
-          sudo mkdir -p $MNT/boot/efi
-          sudo mount ${LOOP}p1 $MNT/boot/efi
-
-          # ── Script installer ───────────────────────────────────────────
-          sudo cp tools/install-camera-viewer.sh $MNT/usr/local/bin/install-camera-viewer.sh
-          sudo chmod 755 $MNT/usr/local/bin/install-camera-viewer.sh
-          echo "✓ Script installer copiato"
-
-          # ── Servizio systemd ───────────────────────────────────────────
-          sudo tee $MNT/etc/systemd/system/cv-installer.service > /dev/null << 'EOF'
-          [Unit]
-          Description=Camera Viewer Installer
-          ConditionKernelCommandLine=cv_install=1
-          After=local-fs.target
-          DefaultDependencies=no
-          Conflicts=camera-bootmode.service camera-webconfig.service lightdm.service
-
-          [Service]
-          Type=oneshot
-          ExecStartPre=/bin/chvt 1
-          ExecStart=/usr/local/bin/install-camera-viewer.sh
-          StandardInput=tty
-          StandardOutput=tty
-          StandardError=tty
-          TTYPath=/dev/tty1
-          RemainAfterExit=yes
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF
-
-          sudo mkdir -p $MNT/etc/systemd/system/multi-user.target.wants
-          sudo ln -sf /etc/systemd/system/cv-installer.service \
-            $MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service
-          echo "✓ Servizio systemd abilitato"
-
-          # ── Fix: nessun servizio blocca il boot senza rete ──────────
-          # cloud-init: file disabled + maschera i 4 servizi systemd.
-          # Solo il file .disabled non basta: i servizi si avviano comunque,
-          # tengono in sospeso network-online.target e causano 2 min di wait.
-          sudo mkdir -p $MNT/etc/cloud
-          sudo touch $MNT/etc/cloud/cloud-init.disabled
-          for svc in cloud-init cloud-init-local cloud-config cloud-final; do
-            sudo ln -sf /dev/null $MNT/etc/systemd/system/${svc}.service
-          done
-          # network-online.target: mascherato così nessun servizio aspetta la rete
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/network-online.target
-          # network-wait-online (doppia sicurezza)
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/systemd-networkd-wait-online.service
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/NetworkManager-wait-online.service
-          # systemd-networkd: su Ubuntu 24.04 minimal può essere attivo insieme a NM → conflitti e wait
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/systemd-networkd.service
-          # apt-daily: aggiornamenti automatici non voluti su kiosk
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily.service
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily-upgrade.service
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily.timer
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily-upgrade.timer
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/unattended-upgrades.service
-          echo "✓ cloud-init (4 servizi) mascherato, network-online.target mascherato, apt-daily mascherato"
-
-          # ── Fix autologin: rileva utente reale (UID 1000) ──────────────
-          KIOSK_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home/ {print $1; exit}' \
-              $MNT/etc/passwd)
-          echo "Utente kiosk rilevato: '$KIOSK_USER'"
-          if [ -z "$KIOSK_USER" ]; then
-            echo "::error::KIOSK_USER non rilevato in /etc/passwd — l'immagine base non contiene un utente con UID>=1000. Impossibile configurare autologin."
-            exit 1
-          fi
-          if [ -n "$KIOSK_USER" ]; then
-            # Aggiorna autologin lightdm
-            sudo mkdir -p $MNT/etc/lightdm/lightdm.conf.d
-            printf '[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\nuser-session=openbox\n' \
-              "$KIOSK_USER" | sudo tee $MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf > /dev/null
-            echo "✓ autologin-user → $KIOSK_USER"
-
-            # Gruppo nopasswdlogin: richiesto da PAM per autologin senza password.
-            # Senza questo pam_succeed_if fallisce → login screen.
-            # Usa sed: nessun blocco multilinea che rompe il YAML.
-            sudo grep -q "^nopasswdlogin:" $MNT/etc/group \
-              || echo "nopasswdlogin:x:64055:" | sudo tee -a $MNT/etc/group > /dev/null
-            sudo grep -qE "^nopasswdlogin:.*:([^,]+,)*${KIOSK_USER}(,[^,]+)*$" $MNT/etc/group \
-              || sudo sed -i "s|^\(nopasswdlogin:[^:]*:[^:]*:\)\(.*\)$|\1\2,${KIOSK_USER}|" $MNT/etc/group
-            sudo sed -i "s|^\(nopasswdlogin:[^:]*:[^:]*:\),|\1|" $MNT/etc/group
-            echo "✓ $KIOSK_USER aggiunto al gruppo nopasswdlogin"
-
-            # PAM autologin: sufficient + pam_permit fallback (belt & suspenders).
-            # - Se utente in nopasswdlogin → successo immediato (sufficient).
-            # - Altrimenti → pam_permit.so garantisce comunque l'autologin kiosk.
-            # Usa printf invece di heredoc: i heredoc a colonna 0 rompono il parsing YAML.
-            printf '#%%PAM-1.0\nauth    required   pam_env.so readenv=1 user_readenv=0\nauth    sufficient pam_succeed_if.so user ingroup nopasswdlogin\nauth    required   pam_permit.so\n@include common-account\n@include common-session\n' \
-              | sudo tee $MNT/etc/pam.d/lightdm-autologin > /dev/null
-            echo "✓ PAM lightdm-autologin configurato"
-
-            # Openbox autostart: scritto in questo workflow (non dipende dal base image)
-            sudo mkdir -p $MNT/home/$KIOSK_USER/.config/openbox
-            printf 'xset s off; xset -dpms; xset s noblank\nunclutter -idle 1 -root &\n/usr/local/sbin/cv-viewer-launch &\n' \
-              | sudo tee $MNT/home/$KIOSK_USER/.config/openbox/autostart > /dev/null
-            sudo chown -R 1000:1000 $MNT/home/$KIOSK_USER/.config
-            echo "✓ openbox autostart scritto per $KIOSK_USER"
-          fi
-
-          # ── Kiosk: cv-ap + cv-bootmode + camera-bootmode.service ───────
-          # cv-ap: gestisce AP WiFi con captive portal (auto-detect interfaccia)
-          sudo cp raspberry/scripts/cv-ap         $MNT/usr/local/sbin/cv-ap
-          sudo cp raspberry/scripts/cv-bootmode   $MNT/usr/local/sbin/cv-bootmode
-          sudo cp raspberry/scripts/cv-viewer-launch $MNT/usr/local/sbin/cv-viewer-launch
-          sudo chmod 755 $MNT/usr/local/sbin/cv-ap \
-                         $MNT/usr/local/sbin/cv-bootmode \
-                         $MNT/usr/local/sbin/cv-viewer-launch
-          # camera-bootmode.service: avvia cv-bootmode al boot (senza network-online.target)
-          sudo cp raspberry/systemd/camera-bootmode.service \
-              $MNT/etc/systemd/system/camera-bootmode.service
-          # camera-webconfig.service: watchdog Restart=always + utente corretto
-          sudo cp raspberry/systemd/camera-webconfig.service \
-              $MNT/etc/systemd/system/camera-webconfig.service
-          if [ -n "$KIOSK_USER" ]; then
-            sudo sed -i "s/KIOSK_USER_PLACEHOLDER/$KIOSK_USER/g" \
-                $MNT/etc/systemd/system/camera-webconfig.service
-          fi
-          sudo mkdir -p $MNT/etc/systemd/system/multi-user.target.wants
-          sudo ln -sf /etc/systemd/system/camera-bootmode.service \
-              $MNT/etc/systemd/system/multi-user.target.wants/camera-bootmode.service
-          # Watchdog lightdm: Restart=always se crasha
-          sudo mkdir -p $MNT/etc/systemd/system/lightdm.service.d
-          printf '[Service]\nRestart=always\nRestartSec=5\n' \
-            | sudo tee $MNT/etc/systemd/system/lightdm.service.d/restart.conf > /dev/null
-          echo "✓ cv-ap + cv-bootmode + camera-bootmode.service installati e abilitati"
-          echo "✓ camera-webconfig.service: Restart=always + utente $KIOSK_USER"
-          echo "✓ lightdm: Restart=always"
-
-          # ── Hotspot WiFi: cv-hotspot.service rimosso ───────────────────
-          # cv-ap (gestito da cv-bootmode) è il gestore AP canonico con captive portal.
-          # cv-hotspot.service è rimosso per evitare conflitti: entrambi tenterebbero
-          # di portare su un AP sulla stessa interfaccia WiFi.
-          sudo rm -f $MNT/etc/systemd/system/multi-user.target.wants/cv-hotspot.service
-          sudo rm -f $MNT/etc/systemd/system/cv-hotspot.service
-          echo "✓ cv-hotspot.service rimosso (usa cv-ap + cv-bootmode)"
-
-          # ── Boot silenzioso: quiet splash (niente testo che scorre) ────
-          sudo sed -i \
-            's/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"/' \
-            $MNT/etc/default/grub
-          grep -q '^GRUB_CMDLINE_LINUX_DEFAULT=' $MNT/etc/default/grub || \
-            echo 'GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"' | sudo tee -a $MNT/etc/default/grub
-          sudo sed -i \
-            's/^GRUB_DISTRIBUTOR=.*/GRUB_DISTRIBUTOR="Camera Viewer"/' \
-            $MNT/etc/default/grub
-          grep -q '^GRUB_DISTRIBUTOR=' $MNT/etc/default/grub || \
-            echo 'GRUB_DISTRIBUTOR="Camera Viewer"' | sudo tee -a $MNT/etc/default/grub
-          echo "✓ /etc/default/grub: quiet splash + distributor Camera Viewer"
-
-          # ── FIX network wait: parametri kernel nel grub.cfg esistente ──────
-          # /etc/default/grub da solo non basta: update-grub non gira nel workflow.
-          # Patchiamo direttamente le righe 'linux ...' nel grub.cfg già generato.
-          # Parametri aggiunti:
-          #   cloud-init=disabled     → blocca cloud-init a livello kernel (più robusto di .disabled)
-          #   systemd.mask=...        → maschera servizi wait-online prima che systemd legga i file
-          EXTRA_PARAMS="cloud-init=disabled systemd.mask=NetworkManager-wait-online.service systemd.mask=systemd-networkd-wait-online.service systemd.mask=systemd-networkd.service"
-          sudo sed -i "s|^\(\s*linux\s.*root=LABEL=cv-system.*\)|\1 ${EXTRA_PARAMS}|" $MNT/boot/grub/grub.cfg
-          echo "✓ Kernel cmdline patchato in grub.cfg: $EXTRA_PARAMS"
-
-          # ── Splash GRUB: immagine Camera Viewer by Enzo Pellegrino ─────
-          sudo apt-get install -y imagemagick fonts-dejavu-core 2>/dev/null | tail -1
-          FONT_BOLD="/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-          FONT_REG="/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
-          convert -size 1920x1080 \
-            -define gradient:angle=150 gradient:'#060d1a-#0e2040' \
-            -fill '#1a7fd4' \
-            -font "$FONT_BOLD" -pointsize 100 \
-            -gravity Center -annotate 0x0+0-110 'Camera Viewer' \
-            -fill '#4da6ff' \
-            -font "$FONT_REG" -pointsize 38 \
-            -gravity Center -annotate 0x0+0+20 'by Enzo Pellegrino' \
-            -fill '#3a5070' \
-            -font "$FONT_REG" -pointsize 24 \
-            -gravity South -annotate 0x0+0+40 \
-            'Usa le frecce per navigare · Invio per selezionare' \
-            /tmp/cv-grub-bg.png 2>/dev/null \
-          || convert -size 1920x1080 xc:'#060d1a' /tmp/cv-grub-bg.png
-          sudo cp /tmp/cv-grub-bg.png $MNT/boot/grub/cv-grub-bg.png
-          echo "✓ Splash GRUB generata (1920x1080)"
-
-          # ── GRUB: leggi kernel e initrd dal grub.cfg esistente ───────
-          GRUB_CFG=$MNT/boot/grub/grub.cfg
-
-          # Rinomina Ubuntu → Camera Viewer nel menuentry principale
-          sudo sed -i "s/menuentry 'Ubuntu'/menuentry 'Camera Viewer'/"  $GRUB_CFG
-          sudo sed -i 's/menuentry "Ubuntu"/menuentry "Camera Viewer"/'  $GRUB_CFG
-
-          KERNEL=$(sudo grep -oP '/boot/vmlinuz-\S+' $GRUB_CFG | head -1)
-          INITRD=$(sudo grep -oP '/boot/initrd\.img-\S+' $GRUB_CFG | head -1)
-          echo "Kernel: $KERNEL"
-          echo "Initrd: $INITRD"
-
-          if [ -z "$KERNEL" ] || [ -z "$INITRD" ]; then
-            echo "::error::Kernel o initrd non trovati in grub.cfg"
-            sudo cat $GRUB_CFG || true
-            exit 1
-          fi
-
-          # Aggiungi in fondo a grub.cfg (GRUB usa l'ultima assegnazione → override sicuro):
-          # 1. Setup grafico: background Camera Viewer by Enzo Pellegrino
-          # 2. Timeout 15s con menu visibile
-          # 3. Voce installer
-          # Nota: strip degli spazi iniziali per evitare problemi con parser GRUB
-          VERSION_TAG="${{ steps.vars.outputs.version }}"
-          cat << EOF | sed 's/^          //' | sudo tee -a $GRUB_CFG > /dev/null
-
-          # ── Camera Viewer: grafica e timeout ──────────────────────────
-          insmod all_video
-          insmod gfxterm
-          insmod png
-          set gfxmode=auto
-          set gfxpayload=keep
-          terminal_output gfxterm
-          background_image /boot/grub/cv-grub-bg.png
-          set menu_color_normal=white/black
-          set menu_color_highlight=black/white
-
-          set timeout_style=menu
-          set timeout=15
-
-          menuentry "  Installa Camera Viewer v${VERSION_TAG} su disco interno" {
-              linux ${KERNEL} root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target
-              initrd ${INITRD}
-          }
-          EOF
-          echo "✓ Menu GRUB: splash + timeout=15s + voce Installa aggiunti in fondo a grub.cfg"
-
-          # ── Plymouth: tema Camera Viewer (sostituisce spinner Ubuntu) ─────
-          sudo mkdir -p $MNT/usr/share/plymouth/themes/camera-viewer
-          printf '[Plymouth Theme]\nName=Camera Viewer\nDescription=Camera Viewer Boot Screen - by Enzo Pellegrino\nModuleName=details\n' \
-            | sudo tee $MNT/usr/share/plymouth/themes/camera-viewer/camera-viewer.plymouth > /dev/null
-          # Aggiorna initramfs dentro chroot per attivare il tema
-          for d in dev dev/pts proc sys run; do
-            sudo mount --bind "/$d" $MNT/$d 2>/dev/null || true
-          done
-          sudo chroot $MNT bash -c "
-            update-alternatives --install \
-                /usr/share/plymouth/themes/default.plymouth \
-                default.plymouth \
-                /usr/share/plymouth/themes/camera-viewer/camera-viewer.plymouth \
-                200 || true
-            update-initramfs -u -k all || true
-            echo PLYMOUTH_OK
-          " || echo "(Plymouth update opzionale — continuo)"
-          # Flush I/O e termina eventuali processi rimasti nel chroot
-          # (update-initramfs può avviare udev in background)
-          # 1. fuser PRIMA dei bind-umount: uccide processi che tengono /dev, /proc, ecc.
-          sudo sync
-          sudo fuser -km $MNT 2>/dev/null || true
-          # 2. Aspetta che udev dreni la coda eventi (più affidabile di sleep fisso)
-          sudo udevadm settle --timeout=30 2>/dev/null || true
-          # 3. Smonta bind mounts in ordine inverso con lazy fallback
-          for d in run sys proc dev/pts dev; do
-            sudo umount $MNT/$d 2>/dev/null || sudo umount -l $MNT/$d 2>/dev/null || true
-          done
-          echo "✓ Plymouth: tema Camera Viewer (details) attivato"
-
-          # ── Smonta ────────────────────────────────────────────────────
-          sudo sync
-          sudo umount $MNT/boot/efi 2>/dev/null || sudo umount -l $MNT/boot/efi 2>/dev/null || true
-          # Se umount normale fallisce, lazy umount + attesa prima di losetup -d
-          # (lazy + losetup immediato può corrompere l'immagine)
-          if ! sudo umount $MNT; then
-            sudo umount -l $MNT
-            sudo sync
-          fi
-          # Retry losetup -d: il loop device potrebbe ancora drenare I/O
-          for i in $(seq 1 10); do
-            sudo losetup -d $LOOP && break || sleep 1
-          done
-          echo "✓ Immagine modificata e smontata"
-
-      # ── Ricomprimi ────────────────────────────────────────────────────────
-      - name: Ricompressione immagine
-        run: |
-          TAG=${{ steps.vars.outputs.tag }}
-          echo "Compressione xz -6 in corso (~5 min)..."
-          xz -6 -T0 /tmp/camera-viewer-base.img
-          mv /tmp/camera-viewer-base.img.xz "camera-viewer-${TAG}.img.xz"
-          ls -lh "camera-viewer-${TAG}.img.xz"
-          df -h .
-
-      # ── Pubblica ──────────────────────────────────────────────────────────
       - name: Carica immagine sulla release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=${{ steps.vars.outputs.tag }}
-          IMG_XZ="camera-viewer-${TAG}.img.xz"
-
-          # Solo .img.xz (Balena Etcher lo apre direttamente, dd/macOS pure)
-          # Il .img raw pesa ~11 GB — supera il limite GitHub di 2 GB per asset
-          gh release upload "$TAG" "$IMG_XZ" --clobber
-
+          VERSION="${{ github.event.inputs.version }}"
+          TAG="v${VERSION}"
+          IMG="/tmp/cv-output/camera-viewer-v${VERSION}.img.xz"
+          gh release upload "$TAG" "$IMG" --clobber
           echo ""
-          echo "✅ Immagine pubblicata su release $TAG:"
-          echo "   $(ls -lh $IMG_XZ | awk '{print $5, $9}')"
-          echo ""
-          echo "Balena Etcher → apri camera-viewer-${TAG}.img.xz direttamente"
-          echo "dd (macOS)    → xz -dc $IMG_XZ | sudo dd of=/dev/rdiskX bs=1m"
+          echo "✅ Pubblicato: camera-viewer-v${VERSION}.img.xz"
+          echo "   $(ls -lh "$IMG" | awk '{print $5}')"
