@@ -129,10 +129,20 @@ jobs:
             $MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service
           echo "✓ Servizio systemd abilitato"
 
-          # ── Fix: network-wait-online non blocca il boot senza rete ────
+          # ── Fix: nessun servizio blocca il boot senza rete ──────────
+          # cloud-init: 4 servizi che aspettano rete → fino a 2 min di delay
+          sudo mkdir -p $MNT/etc/cloud
+          sudo touch $MNT/etc/cloud/cloud-init.disabled
+          # network-wait-online: bloccano il boot se nessun ethernet
           sudo ln -sf /dev/null $MNT/etc/systemd/system/systemd-networkd-wait-online.service
-          sudo ln -sf /dev/null $MNT/etc/systemd/system/NetworkManager-wait-online.service 2>/dev/null || true
-          echo "✓ network-wait-online mascherato"
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/NetworkManager-wait-online.service
+          # apt-daily: aggiornamenti automatici non voluti su kiosk
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily.service
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily-upgrade.service
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily.timer
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/apt-daily-upgrade.timer
+          sudo ln -sf /dev/null $MNT/etc/systemd/system/unattended-upgrades.service
+          echo "✓ cloud-init disabilitato, network-wait e apt-daily mascherati"
 
           # ── Fix autologin: rileva utente reale (UID 1000) ──────────────
           KIOSK_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home/ {print $1; exit}' \

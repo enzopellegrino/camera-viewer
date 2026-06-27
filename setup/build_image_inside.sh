@@ -202,6 +202,22 @@ ln -sf /data/camera-viewer /home/pi/.config/camera-viewer
 ln -sf /usr/lib/systemd/system/lightdm.service \
        /etc/systemd/system/display-manager.service
 
+# ── Disabilita servizi che bloccano il boot senza rete ─────────────────────
+# cloud-init: 4 servizi Ubuntu che aspettano rete → fino a 2 min di delay
+mkdir -p /etc/cloud
+touch /etc/cloud/cloud-init.disabled
+# NetworkManager-wait-online + systemd-networkd-wait-online: masked via /dev/null
+ln -sf /dev/null /etc/systemd/system/NetworkManager-wait-online.service
+ln -sf /dev/null /etc/systemd/system/systemd-networkd-wait-online.service
+# apt-daily: download aggiornamenti in background al boot → rallenta
+ln -sf /dev/null /etc/systemd/system/apt-daily.service
+ln -sf /dev/null /etc/systemd/system/apt-daily-upgrade.service
+ln -sf /dev/null /etc/systemd/system/apt-daily.timer
+ln -sf /dev/null /etc/systemd/system/apt-daily-upgrade.timer
+# unattended-upgrades: upgrade automatici (non voluti su kiosk)
+ln -sf /dev/null /etc/systemd/system/unattended-upgrades.service
+echo "✓ Servizi network-wait e apt-daily mascherati"
+
 echo "Pacchetti installati."
 CHROOT
 ok "Pacchetti installati"

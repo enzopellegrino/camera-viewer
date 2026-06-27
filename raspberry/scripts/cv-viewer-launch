@@ -111,11 +111,19 @@ if ! $PYTHON3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG_DIR/config
     _show_ip_overlay
 fi
 
-# Supervisor loop: (re)start the viewer whenever it exits, as long as we are
-# still in operational mode (cameras present, no force-setup flag).
+# Supervisor loop:
+#  - Provisioning (no telecamere): aspetta in loop finché non vengono configurate.
+#    La sessione openbox resta viva; il portale web (camera-webconfig) è già in
+#    ascolto; l'overlay hotspot/IP è già sullo schermo.
+#  - Operativo (telecamere presenti): avvia main.py e riavvia se crasha.
 while true; do
   [ -f "$CFG_DIR/force-setup" ] && break
-  $PYTHON3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG_DIR/config.json')).get('cameras') else 1)" || break
+
+  if ! $PYTHON3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG_DIR/config.json')).get('cameras') else 1)" 2>/dev/null; then
+    # Nessuna telecamera ancora: siamo in provisioning. Aspetta e riprova.
+    sleep 10
+    continue
+  fi
 
   $PYTHON3 main.py >>/tmp/viewer.log 2>&1
 
