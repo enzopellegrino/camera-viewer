@@ -8,7 +8,17 @@
 # =============================================================================
 set -euo pipefail
 
-LOG="/home/pi/setup-nuc.log"
+# Rileva l'utente che ha lanciato sudo (o il primo utente desktop con UID >= 1000)
+if [ -n "${SUDO_USER:-}" ]; then
+    KIOSK_USER="$SUDO_USER"
+else
+    KIOSK_USER=$(awk -F: '$3 >= 1000 && $3 < 65534 && $6 ~ /^\/home/ {print $1; exit}' /etc/passwd)
+fi
+KIOSK_USER="${KIOSK_USER:-ubuntu}"
+KIOSK_HOME="/home/$KIOSK_USER"
+echo "Setup utente kiosk: $KIOSK_USER  (home: $KIOSK_HOME)"
+
+LOG="$KIOSK_HOME/setup-nuc.log"
 START_TS=$(date +%s)
 
 # Redirect tutto l'output verboso al log, non allo schermo
@@ -177,22 +187,22 @@ show_screen "Configurazione in corso..." "Installazione app" 50 \
     "✓ Hardware: $GPU_LABEL" \
     "✓ Pacchetti installati"
 echo "[4/9] App..."
-if [ -f /home/pi/camera-viewer.tar.gz ]; then
+if [ -f "$KIOSK_HOME/camera-viewer.tar.gz" ]; then
     echo "Estrazione da USB..."
-    rm -rf /home/pi/camera-viewer
-    mkdir -p /home/pi/camera-viewer
-    tar xzf /home/pi/camera-viewer.tar.gz -C /home/pi/camera-viewer/ \
+    rm -rf "$KIOSK_HOME/camera-viewer"
+    mkdir -p "$KIOSK_HOME/camera-viewer"
+    tar xzf "$KIOSK_HOME/camera-viewer.tar.gz" -C "$KIOSK_HOME/camera-viewer/" \
         --warning=no-unknown-keyword 2>/dev/null || \
-    tar xzf /home/pi/camera-viewer.tar.gz -C /home/pi/camera-viewer/ 2>/dev/null || true
-    chown -R pi:pi /home/pi/camera-viewer
-    rm -f /home/pi/camera-viewer.tar.gz
+    tar xzf "$KIOSK_HOME/camera-viewer.tar.gz" -C "$KIOSK_HOME/camera-viewer/" 2>/dev/null || true
+    chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME/camera-viewer"
+    rm -f "$KIOSK_HOME/camera-viewer.tar.gz"
 else
     echo "Fallback: clone GitHub..."
-    sudo -u pi git clone -b main \
+    sudo -u "$KIOSK_USER" git clone -b main \
         https://github.com/enzopellegrino/camera-viewer.git \
-        /home/pi/camera-viewer
+        "$KIOSK_HOME/camera-viewer"
 fi
-[ -f /home/pi/camera-viewer/main.py ] || { echo "ERRORE: app non trovata"; exit 1; }
+[ -f "$KIOSK_HOME/camera-viewer/main.py" ] || { echo "ERRORE: app non trovata"; exit 1; }
 
 # ── 5. Python venv ───────────────────────────────────────────────────────────
 show_screen "Configurazione in corso..." "Configurazione Python" 60 \
@@ -200,11 +210,11 @@ show_screen "Configurazione in corso..." "Configurazione Python" 60 \
     "✓ Pacchetti installati" \
     "✓ App installata"
 echo "[5/9] Python venv..."
-cd /home/pi/camera-viewer
-sudo -H -u pi python3 -m venv .venv
-sudo -H -u pi .venv/bin/pip install --upgrade pip -q
-sudo -H -u pi .venv/bin/pip install -r requirements.txt -q
-sudo -H -u pi .venv/bin/pip install flask -q
+cd "$KIOSK_HOME/camera-viewer"
+sudo -H -u "$KIOSK_USER" python3 -m venv .venv
+sudo -H -u "$KIOSK_USER" .venv/bin/pip install --upgrade pip -q
+sudo -H -u "$KIOSK_USER" .venv/bin/pip install -r requirements.txt -q
+sudo -H -u "$KIOSK_USER" .venv/bin/pip install flask -q
 
 # ── 6. Script cv-* ───────────────────────────────────────────────────────────
 show_screen "Configurazione in corso..." "Script di sistema" 70 \
@@ -216,6 +226,8 @@ install -m 755 raspberry/scripts/cv-mode           /usr/local/sbin/cv-mode
 install -m 755 raspberry/scripts/cv-viewer-launch  /usr/local/sbin/cv-viewer-launch
 install -m 755 raspberry/scripts/cv-vpn            /usr/local/sbin/cv-vpn
 install -m 755 raspberry/scripts/cv-ovpn           /usr/local/sbin/cv-ovpn
+install -m 755 raspberry/scripts/cv-ap             /usr/local/sbin/cv-ap
+install -m 755 raspberry/scripts/cv-bootmode       /usr/local/sbin/cv-bootmode
 install -m 440 raspberry/scripts/sudoers-cv-helpers /etc/sudoers.d/cv-helpers
 
 if [ -n "$CV_HWDEC_BACKEND" ]; then
@@ -238,9 +250,9 @@ show_screen "Configurazione in corso..." "Display e kiosk" 80 \
     "✓ Script di sistema"
 echo "[7/9] LightDM + openbox..."
 mkdir -p /etc/lightdm/lightdm.conf.d
-cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf << 'EOF'
+cat > /etc/lightdm/lightdm.conf.d/50-autologin.conf << EOF
 [Seat:*]
-autologin-user=pi
+autologin-user=$KIOSK_USER
 autologin-user-timeout=0
 user-session=openbox
 EOF
@@ -251,18 +263,18 @@ Exec=/usr/bin/openbox-session
 TryExec=/usr/bin/openbox-session
 Type=Application
 EOF
-mkdir -p /home/pi/.config/openbox
-cat > /home/pi/.config/openbox/autostart << 'EOF'
+mkdir -p "$KIOSK_HOME/.config/openbox"
+cat > "$KIOSK_HOME/.config/openbox/autostart" << 'EOF'
 xset s off; xset -dpms; xset s noblank
 unclutter -idle 1 -root &
 /usr/local/sbin/cv-viewer-launch &
 EOF
-chown -R pi:pi /home/pi/.config
-mkdir -p /home/pi/.config/camera-viewer
-chown pi:pi /home/pi/.config/camera-viewer
-rm -f /home/pi/.Xauthority
+chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME/.config"
+mkdir -p "$KIOSK_HOME/.config/camera-viewer"
+chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME/.config/camera-viewer"
+rm -f "$KIOSK_HOME/.Xauthority"
 groupadd -f nopasswdlogin
-usermod -a -G nopasswdlogin pi
+usermod -a -G nopasswdlogin "$KIOSK_USER"
 ln -sf /usr/lib/systemd/system/lightdm.service \
        /etc/systemd/system/display-manager.service
 
@@ -274,14 +286,20 @@ show_screen "Configurazione in corso..." "Attivazione servizi" 90 \
 echo "[8/9] Servizi systemd..."
 install -m 644 raspberry/systemd/camera-webconfig.service \
     /etc/systemd/system/camera-webconfig.service
+install -m 644 raspberry/systemd/camera-bootmode.service \
+    /etc/systemd/system/camera-bootmode.service
+# Patch utente kiosk nel servizio webconfig
+sed -i "s/KIOSK_USER_PLACEHOLDER/$KIOSK_USER/g" \
+    /etc/systemd/system/camera-webconfig.service
 systemctl daemon-reload
 systemctl enable lightdm
 systemctl enable camera-webconfig
+systemctl enable camera-bootmode
 
 # ── 9. Fine ──────────────────────────────────────────────────────────────────
 echo "[9/9] Completato!"
 touch /etc/cv-firstboot.done
-rm -f /home/pi/setup-nuc.sh
+rm -f "$KIOSK_HOME/setup-nuc.sh"
 
 IP=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "...")
 show_done "$IP"

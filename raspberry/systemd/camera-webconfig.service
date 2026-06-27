@@ -4,15 +4,17 @@ After=network.target NetworkManager.service
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/camera-viewer
-Environment=CAMERA_VIEWER_CONFIG=/home/pi/.config/camera-viewer/config.json
+# User/WorkingDirectory/CAMERA_VIEWER_CONFIG are patched at image-build time
+# by build-image.yml (sed replaces KIOSK_USER_PLACEHOLDER with the actual user)
+User=KIOSK_USER_PLACEHOLDER
+WorkingDirectory=/home/KIOSK_USER_PLACEHOLDER/camera-viewer
+Environment=CAMERA_VIEWER_CONFIG=/home/KIOSK_USER_PLACEHOLDER/.config/camera-viewer/config.json
 Environment=PORT=80
 Environment=HOST=0.0.0.0
 Environment=PORTAL_HOST=10.42.0.1
 ExecStart=/usr/bin/python3 -m raspberry.webconfig.server
-Restart=on-failure
-RestartSec=3
+Restart=always
+RestartSec=5
 # Allow binding to port 80 without running as root.
 # NOTE: do NOT restrict CapabilityBoundingSet here — the app uses sudo to call
 # the cv-* helpers, and a restricted bounding set would strip the capabilities

@@ -14,7 +14,10 @@
 #
 # Uses absolute paths (NOT $HOME): the labwc autostart environment may not
 # export HOME, which previously made the force-setup check fail.
-CFG_DIR="/home/pi/.config/camera-viewer"
+# Usa $HOME se disponibile (sessione utente), altrimenti rileva da UID 1000
+_KIOSK_HOME="${HOME:-$(getent passwd 1000 | cut -d: -f6)}"
+_KIOSK_HOME="${_KIOSK_HOME:-/home/ubuntu}"
+CFG_DIR="${_KIOSK_HOME}/.config/camera-viewer"
 # Native X11 session (rpd-x via lightdm). No XWayland overhead.
 # mpv --vo=gpu works for all embedded windows on X11.
 export QT_QPA_PLATFORM=xcb
@@ -38,7 +41,7 @@ export CAMERA_VIEWER_CONFIG="$CFG_DIR/config.json"
 exec 9>/tmp/cv-viewer-launch.lock
 flock -n 9 || exit 0
 
-cd /home/pi/camera-viewer || exit 0
+cd "${_KIOSK_HOME}/camera-viewer" || exit 0
 
 # Usa il venv se disponibile (NUC/Ubuntu), altrimenti python3 di sistema (Pi)
 PYTHON3="python3"

@@ -153,16 +153,32 @@ jobs:
 
           # ── Kiosk: cv-ap + cv-bootmode + camera-bootmode.service ───────
           # cv-ap: gestisce AP WiFi con captive portal (auto-detect interfaccia)
-          sudo cp raspberry/scripts/cv-ap       $MNT/usr/local/sbin/cv-ap
-          sudo cp raspberry/scripts/cv-bootmode $MNT/usr/local/sbin/cv-bootmode
-          sudo chmod 755 $MNT/usr/local/sbin/cv-ap $MNT/usr/local/sbin/cv-bootmode
+          sudo cp raspberry/scripts/cv-ap         $MNT/usr/local/sbin/cv-ap
+          sudo cp raspberry/scripts/cv-bootmode   $MNT/usr/local/sbin/cv-bootmode
+          sudo cp raspberry/scripts/cv-viewer-launch $MNT/usr/local/sbin/cv-viewer-launch
+          sudo chmod 755 $MNT/usr/local/sbin/cv-ap \
+                         $MNT/usr/local/sbin/cv-bootmode \
+                         $MNT/usr/local/sbin/cv-viewer-launch
           # camera-bootmode.service: avvia cv-bootmode al boot (senza network-online.target)
           sudo cp raspberry/systemd/camera-bootmode.service \
               $MNT/etc/systemd/system/camera-bootmode.service
+          # camera-webconfig.service: watchdog Restart=always + utente corretto
+          sudo cp raspberry/systemd/camera-webconfig.service \
+              $MNT/etc/systemd/system/camera-webconfig.service
+          if [ -n "$KIOSK_USER" ]; then
+            sudo sed -i "s/KIOSK_USER_PLACEHOLDER/$KIOSK_USER/g" \
+                $MNT/etc/systemd/system/camera-webconfig.service
+          fi
           sudo mkdir -p $MNT/etc/systemd/system/multi-user.target.wants
           sudo ln -sf /etc/systemd/system/camera-bootmode.service \
               $MNT/etc/systemd/system/multi-user.target.wants/camera-bootmode.service
+          # Watchdog lightdm: Restart=always se crasha
+          sudo mkdir -p $MNT/etc/systemd/system/lightdm.service.d
+          printf '[Service]\nRestart=always\nRestartSec=5\n' \
+            | sudo tee $MNT/etc/systemd/system/lightdm.service.d/restart.conf > /dev/null
           echo "✓ cv-ap + cv-bootmode + camera-bootmode.service installati e abilitati"
+          echo "✓ camera-webconfig.service: Restart=always + utente $KIOSK_USER"
+          echo "✓ lightdm: Restart=always"
 
           # ── Hotspot WiFi fallback (file da repo) ───────────────────────
           sudo cp tools/cv-hotspot.sh     $MNT/usr/local/bin/cv-hotspot.sh
@@ -250,6 +266,28 @@ jobs:
           }
           EOF
           echo "✓ Menu GRUB: splash + timeout=15s + voce Installa aggiunti in fondo a grub.cfg"
+
+          # ── Plymouth: tema Camera Viewer (sostituisce spinner Ubuntu) ─────
+          sudo mkdir -p $MNT/usr/share/plymouth/themes/camera-viewer
+          printf '[Plymouth Theme]\nName=Camera Viewer\nDescription=Camera Viewer Boot Screen - by Enzo Pellegrino\nModuleName=details\n' \
+            | sudo tee $MNT/usr/share/plymouth/themes/camera-viewer/camera-viewer.plymouth > /dev/null
+          # Aggiorna initramfs dentro chroot per attivare il tema
+          for d in dev dev/pts proc sys run; do
+            sudo mount --bind "/$d" $MNT/$d 2>/dev/null || true
+          done
+          sudo chroot $MNT bash -c "
+            update-alternatives --install \
+                /usr/share/plymouth/themes/default.plymouth \
+                default.plymouth \
+                /usr/share/plymouth/themes/camera-viewer/camera-viewer.plymouth \
+                200 2>/dev/null || true
+            update-initramfs -u -k all 2>/dev/null || true
+            echo PLYMOUTH_OK
+          " || echo "(Plymouth update opzionale — continuo)"
+          for d in run sys proc dev/pts dev; do
+            sudo umount $MNT/$d 2>/dev/null || true
+          done
+          echo "✓ Plymouth: tema Camera Viewer (details) attivato"
 
           # ── Smonta ────────────────────────────────────────────────────
           sudo umount $MNT/boot/efi
