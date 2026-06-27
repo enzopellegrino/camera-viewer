@@ -113,6 +113,7 @@ jobs:
 
           [Service]
           Type=oneshot
+          ExecStartPre=/bin/chvt 1
           ExecStart=/usr/local/bin/install-camera-viewer.sh
           StandardInput=tty
           StandardOutput=tty
@@ -157,22 +158,28 @@ jobs:
           echo "Utente kiosk rilevato: '$KIOSK_USER'"
           if [ -n "$KIOSK_USER" ]; then
             # Aggiorna autologin lightdm
-            if [ -f $MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf ]; then
-              sudo sed -i \
-                "s/autologin-user=.*/autologin-user=${KIOSK_USER}/" \
-                $MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf
-              echo "✓ autologin-user → $KIOSK_USER"
-            fi
-            # Se openbox autostart è ancora in /home/pi ma l'utente è diverso, copia
-            if [ "$KIOSK_USER" != "pi" ] && \
-               [ -f $MNT/home/pi/.config/openbox/autostart ] && \
-               [ ! -f $MNT/home/$KIOSK_USER/.config/openbox/autostart ]; then
-              sudo mkdir -p $MNT/home/$KIOSK_USER/.config/openbox
-              sudo cp $MNT/home/pi/.config/openbox/autostart \
-                     $MNT/home/$KIOSK_USER/.config/openbox/autostart
-              sudo chown -R 1000:1000 $MNT/home/$KIOSK_USER/.config
-              echo "✓ openbox autostart copiato in /home/$KIOSK_USER"
-            fi
+            sudo mkdir -p $MNT/etc/lightdm/lightdm.conf.d
+            printf '[Seat:*]\nautologin-user=%s\nautologin-user-timeout=0\nuser-session=openbox\n' \
+              "$KIOSK_USER" | sudo tee $MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf > /dev/null
+            echo "✓ autologin-user → $KIOSK_USER"
+
+            # PAM autologin: scritto esplicitamente per evitare problemi su sistemi minimali
+            # senza questo file, lightdm potrebbe mostrare la schermata di login invece di autologin
+            sudo tee $MNT/etc/pam.d/lightdm-autologin > /dev/null << 'PAM'
+#%PAM-1.0
+auth    required pam_env.so readenv=1 user_readenv=0
+auth    required pam_succeed_if.so user ingroup nopasswdlogin
+@include common-account
+@include common-session
+PAM
+            echo "✓ PAM lightdm-autologin configurato"
+
+            # Openbox autostart: scritto in questo workflow (non dipende dal base image)
+            sudo mkdir -p $MNT/home/$KIOSK_USER/.config/openbox
+            printf 'xset s off; xset -dpms; xset s noblank\nunclutter -idle 1 -root &\n/usr/local/sbin/cv-viewer-launch &\n' \
+              | sudo tee $MNT/home/$KIOSK_USER/.config/openbox/autostart > /dev/null
+            sudo chown -R 1000:1000 $MNT/home/$KIOSK_USER/.config
+            echo "✓ openbox autostart scritto per $KIOSK_USER"
           fi
 
           # ── Kiosk: cv-ap + cv-bootmode + camera-bootmode.service ───────

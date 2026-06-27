@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Camera Viewer v2.3 — Installer
+# Camera Viewer v2.4 — Installer
 #
 # Viene avviato automaticamente quando si boota la USB con cv_install=1
 # (voce "Installa" nel menu GRUB).
@@ -15,7 +15,7 @@ C='\033[0;36m'; B='\033[1m'; E='\033[0m'
 clear
 echo -e "${C}${B}"
 echo "  ╔══════════════════════════════════════════════════╗"
-echo "  ║   🎥  Camera Viewer v2.3 — Installer            ║"
+echo "  ║   🎥  Camera Viewer v2.4 — Installer            ║"
 echo "  ║       Installazione su disco interno            ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${E}"

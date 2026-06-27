@@ -3,7 +3,7 @@
 # Camera Viewer — Crea immagine disco distribuibile
 #
 # Usa il NUC (sistema funzionante) come sorgente.
-# Produce dist/camera-viewer-v2.3.img.xz da distribuire ai clienti.
+# Produce dist/camera-viewer-v2.4.img.xz da distribuire ai clienti.
 #
 # Workflow:
 #   bash make-image.sh [IP_NUC]   → crea l'immagine
@@ -11,7 +11,7 @@
 #
 # Prerequisiti: NUC acceso, USB non necessaria
 # Tempo: ~15-20 min
-# Output: dist/camera-viewer-v2.3.img.xz (~3-4GB)
+# Output: dist/camera-viewer-v2.4.img.xz (~3-4GB)
 # USB minima: 16GB
 # =============================================================================
 set -euo pipefail
@@ -110,7 +110,7 @@ cat > /tmp/cv-40custom << 'EOF'
 #!/bin/sh
 exec tail -n +3 $0
 
-menuentry "  Installa Camera Viewer v2.3 su disco interno" {
+menuentry "  Installa Camera Viewer v2.4 su disco interno" {
     linux /boot/vmlinuz root=LABEL=cv-system cv_install=1 systemd.unit=multi-user.target quiet
     initrd /boot/initrd.img
 }
