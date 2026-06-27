@@ -4,20 +4,19 @@ name: Build Image from Scratch
 # Usa debootstrap + setup/build_image_inside.sh — nessuna dipendenza da
 # un "base image" pre-costruito sul PC. Tutto è nel repo.
 #
-# Output: camera-viewer-vX.Y.img.xz caricato sulla release GitHub.
+# Output: due file .partaa + .partab sulla release GitHub.
+# GitHub ha un limite di 2GB per file — l'immagine xz-9 è ~2.2GB quindi
+# viene spezzata in due parti da ~1.1GB ciascuna.
 #
-# Stima tempi:
+# Per unire i file e scrivere la USB (Mac/Linux):
+#   cat camera-viewer-v*.img.xz.partaa camera-viewer-v*.img.xz.partab \
+#     | xzcat | sudo dd of=/dev/rdiskX bs=4m
+#
+# Stima tempi build:
 #   debootstrap + apt:  15-20 min
 #   pip (PySide6):       5-10 min
-#   compressione xz:    15-20 min (xz -9 su ~6GB raw)
+#   compressione xz:    15-20 min
 #   totale:             ~40-50 min
-#
-# Riduzioni dimensione rispetto a v2.x:
-#   - Rimossi openvpn + wireguard-tools (~100MB installati)
-#   - Rimosso i965-va-driver (~50MB, solo Intel Broadwell 2015 e prima)
-#   - Rimosso python3-dev (~50MB, solo per compilazione)
-#   - Strip debug symbols da .so del venv PySide6/OpenCV (~200-400MB)
-#   Target: ~1.8-2.0GB compressa (era 2.2GB)
 
 on:
   workflow_dispatch:
@@ -110,21 +109,37 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --title "Camera Viewer v${VERSION}" \
-              --notes "$(printf '## Camera Viewer v%s\n\n### Come installare\n1. Scarica `camera-viewer-%s.img.xz`\n2. Scrivi su USB con Balena Etcher o:\n   ```bash\n   xz -dc camera-viewer-%s.img.xz | sudo dd of=/dev/rdiskX bs=4m\n   ```\n3. Boota il PC dalla USB\n4. Seleziona **Installa Camera Viewer su disco interno**\n5. Digita `INSTALLA` e attendi\n6. Rimuovi la USB → il PC riavvia dal disco\n\n### Primo accesso portale\n- URL: mostrato sullo schermo dopo il boot\n- Login: `admin` / `admin` (cambia subito!)' \
-                "$VERSION" "$TAG" "$TAG")"
+              --notes "$(printf '## Camera Viewer v%s\n\n> ⚠️ Limiti GitHub: il file è diviso in 2 parti (`.partaa` + `.partab`). Uniscile prima di flashare.\n\n### Come installare\n\n**Step 1 — Unisci le parti e scrivi su USB (Mac/Linux):**\n```bash\ncat camera-viewer-v%s.img.xz.partaa camera-viewer-v%s.img.xz.partab \\\n  | xzcat | sudo dd of=/dev/rdiskX bs=4m\n```\n\nOppure unisci prima, poi usa Balena Etcher:\n```bash\ncat camera-viewer-v%s.img.xz.part* > camera-viewer-v%s.img.xz\n# poi apri il file .img.xz con Etcher\n```\n\n**Step 2 — Boota il PC dalla USB**\n\n**Step 3 — Seleziona _Installa Camera Viewer_ nel menu GRUB**\n\n**Step 4 — Digita `INSTALLA` e attendi (5-15 min)**\n\n**Step 5 — Rimuovi la USB → il PC riavvia dal disco**\n\n### Primo accesso portale\n- URL: mostrato sullo schermo dopo il boot\n- Login: `admin` / `admin` (**cambia subito!**)' \
+                "$VERSION" "$VERSION" "$VERSION" "$VERSION" "$VERSION")"
             echo "✓ Release $TAG creata"
           else
             echo "✓ Release $TAG già esistente"
           fi
 
-      - name: Carica immagine sulla release
+      # ── Split + upload ─────────────────────────────────────────────────────
+      # GitHub Release limit: 2GB per file.
+      # L'immagine xz-9 è ~2.2GB → split in due parti da ~1.1GB ciascuna.
+      # L'utente unisce prima di flashare:
+      #   cat *.partaa *.partab | xzcat | sudo dd of=/dev/rdiskX bs=4m
+      - name: Split e carica immagine sulla release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ github.event.inputs.version }}"
           TAG="v${VERSION}"
           IMG="/tmp/cv-output/camera-viewer-v${VERSION}.img.xz"
-          gh release upload "$TAG" "$IMG" --clobber
+          IMG_SIZE=$(stat -c%s "$IMG")
+          echo "Immagine: $(ls -lh "$IMG" | awk '{print $5}') ($IMG_SIZE bytes)"
+          # Split in parti da 1900MB (< 2GB GitHub limit con margine)
+          split -b 1900m "$IMG" "${IMG}.part"
           echo ""
-          echo "✅ Pubblicato: camera-viewer-v${VERSION}.img.xz"
-          echo "   $(ls -lh "$IMG" | awk '{print $5}')"
+          echo "Parti create:"
+          ls -lh "${IMG}.part"*
+          echo ""
+          # Carica tutte le parti (di solito .partaa e .partab)
+          gh release upload "$TAG" "${IMG}.part"* --clobber
+          echo ""
+          echo "✅ Pubblicato: camera-viewer-v${VERSION}.img.xz.partaa + .partab"
+          echo ""
+          echo "Per scrivere la USB (Mac):"
+          echo "  cat camera-viewer-v${VERSION}.img.xz.part* | xzcat | sudo dd of=/dev/rdiskX bs=4m"
