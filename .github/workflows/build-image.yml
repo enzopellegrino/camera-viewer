@@ -128,6 +128,8 @@ jobs:
           VERSION="${{ github.event.inputs.version }}"
           TAG="v${VERSION}"
           IMG="/tmp/cv-output/camera-viewer-v${VERSION}.img.xz"
+          # Il file è owned da root (build step usa sudo) — fix permessi
+          sudo chown "$USER" "$IMG"
           IMG_SIZE=$(stat -c%s "$IMG")
           echo "Immagine: $(ls -lh "$IMG" | awk '{print $5}') ($IMG_SIZE bytes)"
           # Split in parti da 1900MB (< 2GB GitHub limit con margine)
