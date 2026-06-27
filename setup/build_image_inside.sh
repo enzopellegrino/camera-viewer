@@ -151,19 +151,22 @@ apt-get install -y -q --no-install-recommends \
     xorg openbox lightdm \
     libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 libxkbcommon-x11-0
 
-# Video
+# Video — i965 è per GPU Intel Broadwell e precedenti (pre-2016), quasi mai usato.
+# Manteniamo solo intel-media-va-driver (iHD, moderno) e mesa per AMD/altri.
 apt-get install -y -q --no-install-recommends mpv \
-    i965-va-driver intel-media-va-driver \
+    intel-media-va-driver \
     mesa-va-drivers vainfo libva-drm2 libva-x11-2
 
-# Python base — PySide6 viene installato via pip nel venv (non disponibile in apt)
+# Python base — PySide6 viene installato via pip nel venv (non disponibile in apt).
+# python3-dev NON serve a runtime (solo per compilare extension C, non usato).
 apt-get install -y -q --no-install-recommends \
-    python3-pip python3-venv python3-dev \
+    python3-pip python3-venv \
     python3-flask python3-cryptography python3-pil
 apt-get clean
 
-# VPN
-apt-get install -y -q --no-install-recommends openvpn wireguard-tools
+# VPN — openvpn e wireguard rimossi dall'immagine base per ridurre dimensione.
+# Possono essere installati tramite il portale web se necessario.
+# apt-get install -y -q --no-install-recommends openvpn wireguard-tools
 
 # Utilities
 apt-get install -y -q --no-install-recommends \
@@ -307,20 +310,18 @@ set -euo pipefail
 
 cd /home/pi/camera-viewer || exit 0
 
-# Wheel download: scarica i pacchetti Python nell'immagine ma NON li installa.
-# L'installer (install-camera-viewer.sh) crea il venv e installa offline.
-# Risparmia ~1GB nell'immagine USB rispetto a un venv pre-installato.
-# pyinstaller escluso: serve solo per build Mac/Windows, non su kiosk Linux.
-mkdir -p /opt/cv-wheels
-grep -v "pyinstaller" /home/pi/camera-viewer/requirements.txt \
-    > /tmp/cv-requirements-kiosk.txt
-python3 -m pip download \
-    --dest /opt/cv-wheels \
-    --prefer-binary \
-    -r /tmp/cv-requirements-kiosk.txt \
-    flask -q
-echo "✓ Wheels pronti per installazione offline: $(ls /opt/cv-wheels | wc -l) pacchetti"
-du -sh /opt/cv-wheels/ || true
+# Python venv — PySide6 installato nel venv (non disponibile via apt Ubuntu 24.04).
+# I file .so del venv vengono strippati nella fase di pulizia per ridurre dimensione.
+export PIP_CACHE_DIR=/tmp/pip-cache
+mkdir -p /tmp/pip-cache
+sudo -H -u pi python3 -m venv .venv
+sudo -H -u pi .venv/bin/pip install --upgrade pip -q
+# pyinstaller escluso: serve solo per build Mac/Windows, non su kiosk Linux
+grep -v "pyinstaller" requirements.txt > /tmp/cv-requirements-kiosk.txt
+sudo -H -u pi .venv/bin/pip install -r /tmp/cv-requirements-kiosk.txt -q \
+    --cache-dir /tmp/pip-cache
+sudo -H -u pi .venv/bin/pip install flask -q \
+    --cache-dir /tmp/pip-cache
 
 # Script di sistema
 [ -f raspberry/scripts/cv-mode ] && \
@@ -635,6 +636,20 @@ find /target/home/pi/camera-viewer/.venv \
 # .pyc bytecode cache (ricreati al primo avvio)
 find /target -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 find /target -name "*.pyc" -delete 2>/dev/null || true
+
+# Strip debug symbols dai .so nel venv (PySide6, OpenCV, cryptography, ecc.)
+# Risparmia ~200-400MB di dati nel disco — i debug symbols non servono in produzione.
+# --strip-debug: rimuove .debug_info, .debug_aranges, .debug_line ecc.
+# Non tocca la symbol table (export table) — le librerie restano pienamente funzionanti.
+log "Strip debug symbols dal venv..."
+find /target/home/pi/camera-viewer/.venv -name "*.so*" -type f \
+    -exec strip --strip-debug {} + 2>/dev/null || true
+# Strip anche librerie Qt nel sito-packages PySide6
+find /target/home/pi/camera-viewer/.venv -name "libQt*.so*" -type f \
+    -exec strip --strip-debug {} + 2>/dev/null || true
+VENV_SIZE=$(du -sh /target/home/pi/camera-viewer/.venv 2>/dev/null | awk '{print $1}' || echo "?")
+log "Venv dopo strip: ${VENV_SIZE}"
+
 sync
 
 # ── Smonta ────────────────────────────────────────────────────────────────────

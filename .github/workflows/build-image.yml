@@ -8,14 +8,16 @@ name: Build Image from Scratch
 #
 # Stima tempi:
 #   debootstrap + apt:  15-20 min
-#   pip download wheels:  3-5 min  (non installa il venv — scarica solo i .whl)
-#   compressione xz:      5-10 min
-#   totale:             ~25-35 min
+#   pip (PySide6):       5-10 min
+#   compressione xz:    15-20 min (xz -9 su ~6GB raw)
+#   totale:             ~40-50 min
 #
-# Nota: il venv Python (PySide6 etc.) NON è nell'immagine USB.
-# I wheel files sono in /opt/cv-wheels e vengono installati dall'installer
-# (install-camera-viewer.sh) dentro il sistema su disco. L'immagine USB
-# risultante è ~800MB-1.2GB invece di 2.2GB.
+# Riduzioni dimensione rispetto a v2.x:
+#   - Rimossi openvpn + wireguard-tools (~100MB installati)
+#   - Rimosso i965-va-driver (~50MB, solo Intel Broadwell 2015 e prima)
+#   - Rimosso python3-dev (~50MB, solo per compilazione)
+#   - Strip debug symbols da .so del venv PySide6/OpenCV (~200-400MB)
+#   Target: ~1.8-2.0GB compressa (era 2.2GB)
 
 on:
   workflow_dispatch:
