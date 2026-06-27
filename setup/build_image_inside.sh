@@ -286,6 +286,10 @@ chmod +x /usr/local/bin/pcmanfm
     install -m 644 raspberry/systemd/camera-webconfig.service \
         /etc/systemd/system/camera-webconfig.service && \
     systemctl enable camera-webconfig
+[ -f raspberry/systemd/camera-bootmode.service ] && \
+    install -m 644 raspberry/systemd/camera-bootmode.service \
+        /etc/systemd/system/camera-bootmode.service && \
+    systemctl enable camera-bootmode
 
 # Modalità rete: ethernet normale o hotspot WiFi se nessun ethernet
 [ -f raspberry/scripts/cv-network-mode ] && \

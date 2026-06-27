@@ -109,7 +109,7 @@ jobs:
           ConditionKernelCommandLine=cv_install=1
           After=local-fs.target
           DefaultDependencies=no
-          Conflicts=camera-bootmode.service camera-webconfig.service
+          Conflicts=camera-bootmode.service camera-webconfig.service lightdm.service
 
           [Service]
           Type=oneshot
