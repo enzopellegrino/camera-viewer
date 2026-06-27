@@ -83,7 +83,9 @@ jobs:
       - name: Build immagine da zero
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          sudo bash setup/build_image_inside.sh \
+          # XZ_LEVEL=9: compressione massima — GitHub Release limit è 2GB.
+          # xz -9 -T0 su 6GB raw impiega ~15-20 min ma dimezza la dimensione.
+          sudo XZ_LEVEL=9 bash setup/build_image_inside.sh \
             "$VERSION" \
             /tmp/cv-output \
             /tmp/camera-viewer-app.tar.gz

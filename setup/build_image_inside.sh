@@ -609,10 +609,29 @@ EOF
 ok "Partizione dati pronta"
 
 # ── Pulizia ───────────────────────────────────────────────────────────────────
-log "Pulizia cache..."
+log "Pulizia cache e file non necessari..."
 chroot /target apt-get clean
 chroot /target apt-get autoremove -y -q
-rm -rf /target/tmp/* /target/var/cache/apt/archives/*.deb
+# Apt lists: ricreabili con apt update
+rm -rf /target/var/lib/apt/lists/*
+# Deb cache
+rm -rf /target/var/cache/apt/archives/*.deb
+# Tmp
+rm -rf /target/tmp/*
+# Pip cache (dentro e fuori il chroot)
+rm -rf /tmp/pip-cache /target/tmp/pip-cache /target/root/.cache /target/home/pi/.cache
+# Locale non necessari (risparmia ~150-200MB)
+find /target/usr/share/locale -mindepth 1 -maxdepth 1 -type d \
+    ! -name 'it' ! -name 'it_IT' ! -name 'en' ! -name 'en_US' \
+    -exec rm -rf {} + 2>/dev/null || true
+# Documentazione e man pages
+rm -rf /target/usr/share/doc/* /target/usr/share/man/* /target/usr/share/info/*
+# Qt translations nel venv (non necessari per kiosk — risparmia ~30MB)
+find /target/home/pi/camera-viewer/.venv \
+    -path "*/Qt/translations/*.qm" -delete 2>/dev/null || true
+# .pyc bytecode cache (ricreati al primo avvio)
+find /target -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+find /target -name "*.pyc" -delete 2>/dev/null || true
 sync
 
 # ── Smonta ────────────────────────────────────────────────────────────────────
