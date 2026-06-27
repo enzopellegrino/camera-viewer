@@ -165,13 +165,9 @@ jobs:
 
             # PAM autologin: scritto esplicitamente per evitare problemi su sistemi minimali
             # senza questo file, lightdm potrebbe mostrare la schermata di login invece di autologin
-            sudo tee $MNT/etc/pam.d/lightdm-autologin > /dev/null << 'PAM'
-#%PAM-1.0
-auth    required pam_env.so readenv=1 user_readenv=0
-auth    required pam_succeed_if.so user ingroup nopasswdlogin
-@include common-account
-@include common-session
-PAM
+            # Usa printf invece di heredoc: i heredoc a colonna 0 rompono il parsing YAML
+            printf '#%%PAM-1.0\nauth    required pam_env.so readenv=1 user_readenv=0\nauth    required pam_succeed_if.so user ingroup nopasswdlogin\n@include common-account\n@include common-session\n' \
+              | sudo tee $MNT/etc/pam.d/lightdm-autologin > /dev/null
             echo "✓ PAM lightdm-autologin configurato"
 
             # Openbox autostart: scritto in questo workflow (non dipende dal base image)
