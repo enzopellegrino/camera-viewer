@@ -178,13 +178,62 @@ update-locale LANG=it_IT.UTF-8
 # Timezone
 ln -sf /usr/share/zoneinfo/Europe/Rome /etc/localtime
 
-# Utente pi
+# Utente pi — nessuna password hardcodata nel repo
+# Una password random viene generata al primo avvio da cv-firstboot-ssh.service
 useradd -m -s /bin/bash -G sudo,audio,video,plugdev pi
-echo "pi:N1computer@2019" | chpasswd
+passwd -l pi  # account bloccato nell'immagine; sbloccato al primo avvio
 
-# Sudo senza password per pi
+# Sudo senza password per pi (necessario per gli script cv-*)
 echo "pi ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/pi
 chmod 440 /etc/sudoers.d/pi
+
+# Servizio: genera password SSH random al primo avvio e forza cambio
+cat > /usr/local/sbin/cv-firstboot-ssh << 'SCRIPT'
+#!/bin/bash
+# Genera una password SSH temporanea per l'utente pi al primo avvio.
+# L'utente DEVE cambiarla al primo accesso SSH (passwd --expire).
+set -euo pipefail
+
+PASSWORD=$(openssl rand -base64 12 | tr -d '/+=' | head -c 12)
+echo "pi:${PASSWORD}" | chpasswd
+passwd --expire pi
+
+# Salva la password in un file leggibile solo da root
+echo "$PASSWORD" > /etc/cv-ssh-password
+chmod 600 /etc/cv-ssh-password
+
+# Aggiorna /etc/issue così è visibile sul terminale fisico (Alt+F2)
+cat > /etc/issue << EOF
+
+  ┌─────────────────────────────────────────────┐
+  │   🎥   Camera Viewer                        │
+  │        SSH → utente: pi                     │
+  │        Password temporanea: ${PASSWORD}        │
+  │        ⚠  Cambia la password al primo login │
+  │        http://\4                            │
+  └─────────────────────────────────────────────┘
+
+EOF
+
+touch /etc/cv-ssh-firstboot-done
+SCRIPT
+chmod 755 /usr/local/sbin/cv-firstboot-ssh
+
+cat > /etc/systemd/system/cv-firstboot-ssh.service << 'SVC'
+[Unit]
+Description=Camera Viewer — genera password SSH temporanea al primo avvio
+ConditionPathExists=!/etc/cv-ssh-firstboot-done
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cv-firstboot-ssh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+SVC
+systemctl enable cv-firstboot-ssh
 
 # Gruppo nopasswdlogin per autologin LightDM
 groupadd -f nopasswdlogin
