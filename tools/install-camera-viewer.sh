@@ -295,4 +295,8 @@ for i in $(seq 30 -1 1); do
     sleep 1
 done
 echo ""
-reboot
+# Disable ERR trap before reboot: the USB may produce I/O errors during shutdown,
+# causing reboot to return non-zero. The installation is already complete at this point.
+trap - ERR
+sync
+reboot -f 2>/dev/null || systemctl reboot --force 2>/dev/null || reboot
