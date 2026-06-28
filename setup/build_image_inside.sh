@@ -89,10 +89,12 @@ echo "deb http://security.ubuntu.com/ubuntu noble-security main universe" >> /et
 apt-get update -q
 
 # Kernel + live-boot (essenziale: gestisce mount squashfs + overlayfs)
+# efibootmgr: serve a grub-install per creare la voce di boot nella NVRAM UEFI.
 apt-get install -y -q --no-install-recommends \
     linux-image-generic initramfs-tools \
     live-boot live-boot-initramfs-tools \
-    shim-signed grub-efi-amd64-signed
+    shim-signed grub-efi-amd64-signed \
+    efibootmgr
 KERNEL_VER=$(ls /boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/boot/vmlinuz-||')
 
 # Hook initramfs: copia plymouth nell'initrd così live-boot non dà "not found"
@@ -118,8 +120,13 @@ apt-get install -y -q --no-install-recommends \
     sudo locales tzdata
 
 # Display
+# xserver-xorg-video-all / -input-all: driver video (modesetting, intel, amdgpu,
+#   nouveau, vesa, fbdev) e input (libinput). Senza questi, con --no-install-recommends
+#   X non trova lo schermo e lightdm va in loop di riavvio (schermo nero).
+# libgl1-mesa-dri: driver DRI per accelerazione GL (necessari a mpv).
 apt-get install -y -q --no-install-recommends \
     xorg openbox lightdm plymouth \
+    xserver-xorg-video-all xserver-xorg-input-all libgl1-mesa-dri \
     libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 libxkbcommon-x11-0
 
 # Video: mpv + VA-API Intel (iHD) e Mesa (AMD/altri)
