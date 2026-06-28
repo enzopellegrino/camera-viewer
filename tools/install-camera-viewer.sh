@@ -240,6 +240,10 @@ grub-install --target=x86_64-efi \
     --efi-directory=/boot/efi \
     --boot-directory=/boot \
     --removable --recheck 2>&1 | tail -2
+# Rimuovi 'splash' dal cmdline: richiede Plymouth che non è installato.
+# Senza questa riga update-grub genera 'quiet splash' e il boot si blocca.
+sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"quiet loglevel=3\"/' \
+    /etc/default/grub
 update-grub 2>&1 | grep -E 'Found|done|Generating' | head -5
 echo GRUB_OK
 "

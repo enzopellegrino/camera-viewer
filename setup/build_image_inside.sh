@@ -146,9 +146,10 @@ apt-get install -y -q --no-install-recommends \
     curl wget git ca-certificates \
     sudo locales tzdata
 
-# Display
+# Display — plymouth richiesto dall'initramfs di Ubuntu anche senza splash,
+# senza di esso il boot si blocca con "/usr/bin/plymouth: not found".
 apt-get install -y -q --no-install-recommends \
-    xorg openbox lightdm \
+    xorg openbox lightdm plymouth \
     libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-xkb1 libxkbcommon-x11-0
 
 # Video — i965 è per GPU Intel Broadwell e precedenti (pre-2016), quasi mai usato.
