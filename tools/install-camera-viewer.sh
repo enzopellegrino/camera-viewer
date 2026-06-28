@@ -18,6 +18,7 @@ _cleanup() {
     local EXIT=$?
     [ $EXIT -eq 0 ] && return
     echo -e "\n  ${R}${B}Errore durante l'installazione — smontaggio dischi...${E}"
+    umount "$MNT/sys/firmware/efi/efivars" 2>/dev/null || true
     for d in run sys proc dev/pts dev boot/efi data; do
         umount "$MNT/$d" 2>/dev/null || true
     done
@@ -254,6 +255,21 @@ for d in dev dev/pts proc sys run; do
     mount --bind "/$d" "$MNT/$d" 2>/dev/null || true
 done
 
+# Rileva modalità firmware (UEFI vs BIOS legacy).
+# mount --bind /sys non propaga i submount, quindi montiamo efivarfs a parte:
+# serve a efibootmgr (chiamato da grub-install) per scrivere la voce NVRAM.
+if [ -d /sys/firmware/efi ]; then
+    FW_MODE="uefi"
+    mkdir -p "$MNT/sys/firmware/efi/efivars"
+    if ! mount -t efivarfs efivarfs "$MNT/sys/firmware/efi/efivars" 2>/dev/null; then
+        echo -e "  ${Y}⚠  efivarfs non montato: la voce NVRAM potrebbe non essere creata."
+        echo -e "     Si userà il fallback removibile EFI/BOOT/BOOTX64.EFI.${E}"
+    fi
+else
+    FW_MODE="bios"
+fi
+echo "  Modalità firmware rilevata: $FW_MODE"
+
 # Remove live-boot initramfs hook directly on the installed filesystem.
 # apt-get purge inside chroot is unreliable (no set -e, dpkg locks, pre-rm scripts).
 # Deleting the hook file before update-initramfs is simpler and guaranteed.
@@ -261,36 +277,36 @@ rm -f "$MNT/usr/share/initramfs-tools/hooks/live"
 
 chroot "$MNT" bash -c "
 set -eo pipefail
-echo '  Rebuilding initramfs without live-boot...'
+echo '  Rigenerazione initramfs senza live-boot...'
 update-initramfs -u -k all 2>&1 | tail -3
-grub-install --target=x86_64-efi \
-    --efi-directory=/boot/efi \
-    --boot-directory=/boot \
-    --removable --recheck 2>&1 | tail -2
-# nosplash: prevents Plymouth black screen on systems without GPU driver loaded early.
+# nosplash: evita lo schermo nero di Plymouth.
 sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"quiet loglevel=3 nosplash\"/' \
     /etc/default/grub
-update-grub 2>&1 | grep -E 'Found|done|Generating' | head -5
+if [ '$FW_MODE' = 'uefi' ]; then
+    # 1) Voce NVRAM 'CameraViewer' tramite lo shim FIRMATO (compatibile Secure Boot).
+    #    Crea EFI/CameraViewer/{shimx64,grubx64}.efi + voce di boot nel firmware.
+    grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+        --bootloader-id=CameraViewer --recheck 2>&1 | tail -3
+    # 2) Fallback removibile (EFI/BOOT/BOOTX64.EFI = shim firmato) per i firmware
+    #    che non avviano dalla NVRAM sui dischi fissi. Anch'esso firmato.
+    grub-install --target=x86_64-efi --efi-directory=/boot/efi \
+        --removable --recheck 2>&1 | tail -3
+else
+    # BIOS legacy: il layout GPT NON ha una BIOS boot partition (flag bios_grub),
+    # quindi grub i386-pc non può embeddare core.img → disco non avviabile.
+    # Falliamo subito invece di produrre un disco silenziosamente rotto.
+    echo 'ERRORE: avvio BIOS legacy non supportato su questo layout.' >&2
+    echo 'Abilita la modalità UEFI nel BIOS del PC e ripeti installazione.' >&2
+    exit 1
+fi
+# update-grub: separiamo l'output dal filtro cosmetico. grep senza match o il
+# SIGPIPE di 'head' farebbero fallire la pipe con pipefail attivo → falso errore.
+update-grub > /tmp/cv-update-grub.log 2>&1
+grep -E 'Found|done|Generating' /tmp/cv-update-grub.log | head -5 || true
 echo GRUB_OK
 "
 
-# BOOTX64.EFI autocontenuto: cerca cv-system per label (funziona su qualsiasi PC)
-cat > /tmp/grub-early-install.cfg << 'EARLY'
-search --no-floppy --label --set=root cv-system
-set prefix=($root)/boot/grub
-EARLY
-
-KERNEL_VER=$(ls "$MNT/boot/vmlinuz-"*-generic 2>/dev/null | sort -V | tail -1 | \
-    sed "s|$MNT/boot/vmlinuz-||" || echo "")
-
-grub-mkimage \
-    --format=x86_64-efi \
-    --output="$MNT/boot/efi/EFI/BOOT/BOOTX64.EFI" \
-    --config=/tmp/grub-early-install.cfg \
-    --prefix=/boot/grub \
-    part_gpt fat ext2 normal boot linux search search_label all_video \
-    && echo "  Bootloader BOOTX64.EFI creato"
-
+umount "$MNT/sys/firmware/efi/efivars" 2>/dev/null || true
 for d in run sys proc dev/pts dev; do umount "$MNT/$d" 2>/dev/null || true; done
 umount "$MNT/boot/efi"
 umount "$MNT"
