@@ -282,6 +282,10 @@ update-initramfs -u -k all 2>&1 | tail -3
 # nosplash: evita lo schermo nero di Plymouth.
 sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"quiet loglevel=3 nosplash\"/' \
     /etc/default/grub
+# Force VGA text mode so the GRUB menu is always visible, even if gfxterm
+# fails to initialize on the target hardware.
+grep -q '^GRUB_TERMINAL' /etc/default/grub \
+    || echo 'GRUB_TERMINAL=console' >> /etc/default/grub
 if [ '$FW_MODE' = 'uefi' ]; then
     # 1) Voce NVRAM 'CameraViewer' tramite lo shim FIRMATO (compatibile Secure Boot).
     #    Crea EFI/CameraViewer/{shimx64,grubx64}.efi + voce di boot nel firmware.
@@ -305,6 +309,21 @@ update-grub > /tmp/cv-update-grub.log 2>&1
 grep -E 'Found|done|Generating' /tmp/cv-update-grub.log | head -5 || true
 echo GRUB_OK
 "
+
+# Write an explicit grub.cfg in each EFI directory so GRUB can find its config
+# by filesystem LABEL even if grub-probe embedded the wrong prefix inside the
+# chroot (it reads /proc/mounts from the host, which shows the host mountpoints,
+# and may not resolve the correct root UUID).
+# GRUB EFI falls back to grub.cfg in the same directory as the binary when the
+# embedded prefix lookup fails — this ensures the fallback always works.
+for _EFI_DIR in "$MNT/boot/efi/EFI/CameraViewer" "$MNT/boot/efi/EFI/BOOT"; do
+    [ -d "$_EFI_DIR" ] || continue
+    cat > "$_EFI_DIR/grub.cfg" << 'EOFGRUB'
+search --no-floppy --label --set=root cv-system
+set prefix=($root)/boot/grub
+configfile ($root)/boot/grub/grub.cfg
+EOFGRUB
+done
 
 umount "$MNT/sys/firmware/efi/efivars" 2>/dev/null || true
 for d in run sys proc dev/pts dev; do umount "$MNT/$d" 2>/dev/null || true; done
