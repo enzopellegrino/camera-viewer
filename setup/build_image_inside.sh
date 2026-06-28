@@ -137,7 +137,8 @@ apt-get clean
 apt-get install -y -q --no-install-recommends \
     unclutter x11-xserver-utils feh xterm \
     pciutils net-tools iproute2 iptables \
-    htop nano parted e2fsprogs kbd
+    htop nano parted e2fsprogs dosfstools \
+    rsync kbd
 apt-get clean
 
 # WiFi AP / hotspot (provisioning mode)
@@ -308,7 +309,13 @@ Conflicts=camera-bootmode.service camera-webconfig.service lightdm.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/openvt -c 1 -s -w -- /usr/local/bin/install-camera-viewer.sh
+ExecStart=/usr/local/bin/install-camera-viewer.sh
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
 RemainAfterExit=yes
 
 [Install]
