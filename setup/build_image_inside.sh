@@ -493,7 +493,7 @@ set menu_color_highlight=black/white
 
 menuentry "  Avvia Camera Viewer v${VERSION} (Live)" {
     search --no-floppy --label --set=root CV-LIVE
-    linux  /live/vmlinuz boot=live quiet loglevel=3 label=CV-LIVE
+    linux  /live/vmlinuz boot=live quiet loglevel=3 nosplash label=CV-LIVE
     initrd /live/initrd.img
 }
 menuentry "  Installa Camera Viewer v${VERSION} su disco interno" {
@@ -507,7 +507,7 @@ menuentry "  Installa Camera Viewer v${VERSION} su disco interno" {
 }
 menuentry "  Modalita sicura (nomodeset)" {
     search --no-floppy --label --set=root CV-LIVE
-    linux  /live/vmlinuz boot=live nomodeset loglevel=3 label=CV-LIVE
+    linux  /live/vmlinuz boot=live nomodeset loglevel=3 nosplash label=CV-LIVE
     initrd /live/initrd.img
 }
 EOF
