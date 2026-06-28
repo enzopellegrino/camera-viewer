@@ -157,11 +157,12 @@ mkdir -p "$MNT/data"
 
 # ── Copia sistema ─────────────────────────────────────────────────────────────
 echo "  [4/6] Copia sistema (5-15 minuti, dipende dal disco)..."
-rsync -aAX --delete --info=progress2 \
-    --exclude='/proc/*'     --exclude='/sys/*'    --exclude='/dev/*' \
-    --exclude='/run/*'      --exclude='/tmp/*'    --exclude='/mnt/*' \
-    --exclude='/media/*'    --exclude='/data/*'   --exclude='/swap.img' \
+rsync -aA --delete --info=progress2 \
+    --exclude='/proc/*'          --exclude='/sys/*'     --exclude='/dev/*' \
+    --exclude='/run/*'           --exclude='/tmp/*'     --exclude='/mnt/*' \
+    --exclude='/media/*'         --exclude='/data/*'    --exclude='/swap.img' \
     --exclude='/boot/efi' \
+    --exclude='/usr/lib/live' \
     --exclude='/home/pi/.config/camera-viewer/*' \
     / "$MNT/"
 echo ""
