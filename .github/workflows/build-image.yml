@@ -1,28 +1,27 @@
-name: Build Image from Scratch
+name: Build ISO
 
-# Costruisce l'immagine USB Camera Viewer completamente da zero in CI.
-# Usa debootstrap + setup/build_image_inside.sh — nessuna dipendenza da
-# un "base image" pre-costruito sul PC. Tutto è nel repo.
+# Costruisce la Live ISO Camera Viewer completamente da zero in CI.
+# Usa debootstrap + squashfs + grub-mkrescue via setup/build_image_inside.sh.
 #
-# Output: due file .partaa + .partab sulla release GitHub.
-# GitHub ha un limite di 2GB per file — l'immagine xz-9 è ~2.2GB quindi
-# viene spezzata in due parti da ~1.1GB ciascuna.
+# Output: camera-viewer-vX.X.iso (~700-900MB, file unico)
+# Compatibile con Balena Etcher, Rufus, dd.
 #
-# Per unire i file e scrivere la USB (Mac/Linux):
-#   cat camera-viewer-v*.img.xz.partaa camera-viewer-v*.img.xz.partab \
-#     | xzcat | sudo dd of=/dev/rdiskX bs=4m
+# Menu GRUB al boot:
+#   1. Avvia Camera Viewer (Live)      — kiosk senza installare
+#   2. Installa Camera Viewer su disco — copia il sistema sul disco interno
+#   3. Modalità sicura (nomodeset)
 #
 # Stima tempi build:
 #   debootstrap + apt:  15-20 min
 #   pip (PySide6):       5-10 min
-#   compressione xz:    15-20 min
-#   totale:             ~40-50 min
+#   mksquashfs:          3-5 min
+#   totale:             ~25-35 min
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Versione (es. 3.0)'
+        description: 'Versione (es. 3.1)'
         required: true
         default: '3.0'
 
@@ -32,12 +31,11 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
 
     steps:
       # ── Libera spazio disco ────────────────────────────────────────────────
-      # ubuntu-latest ha ~14GB liberi di default; rimuovendo tool non usati
-      # arriviamo a ~30GB — necessario per immagine raw 6GB + build artifacts.
+      # ubuntu-latest ha ~14GB liberi; la ISO build ne richiede ~8GB durante il build.
       - name: Libera spazio disco
         run: |
           sudo rm -rf \
@@ -58,15 +56,13 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends \
-            debootstrap parted dosfstools e2fsprogs \
-            grub-efi-amd64-bin grub-efi-amd64 grub2-common \
-            xz-utils rsync
+            debootstrap squashfs-tools xorriso \
+            grub-efi-amd64-bin grub-pc-bin grub2-common \
+            mtools rsync
           echo "✓ Strumenti build installati"
           df -h .
 
       # ── Tarball app ────────────────────────────────────────────────────────
-      # Crea un archivio con l'intero repo (escludi cache, build, immagini).
-      # build_image_inside.sh lo estrae in /home/pi/camera-viewer/ sull'immagine.
       - name: Crea tarball app
         run: |
           tar czf /tmp/camera-viewer-app.tar.gz \
@@ -76,22 +72,19 @@ jobs:
             --exclude='.venv' \
             --exclude='dist' \
             --exclude='build' \
-            --exclude='*.xz' \
+            --exclude='dist-iso' \
+            --exclude='*.iso' \
             --exclude='*.img' \
-            --exclude='*.img.gz' \
+            --exclude='*.img.xz' \
             -C . .
           ls -lh /tmp/camera-viewer-app.tar.gz
           echo "✓ Tarball app creato"
 
-      # ── Build immagine da zero ─────────────────────────────────────────────
-      # Esegue build_image_inside.sh come root (richiede losetup, mount, chroot).
-      # GitHub Actions ubuntu-latest supporta tutti questi comandi natively.
-      - name: Build immagine da zero
+      # ── Build ISO ──────────────────────────────────────────────────────────
+      - name: Build ISO
         run: |
           VERSION="${{ github.event.inputs.version }}"
-          # XZ_LEVEL=9: compressione massima — GitHub Release limit è 2GB.
-          # xz -9 -T0 su 6GB raw impiega ~15-20 min ma dimezza la dimensione.
-          sudo XZ_LEVEL=9 bash setup/build_image_inside.sh \
+          sudo bash setup/build_image_inside.sh \
             "$VERSION" \
             /tmp/cv-output \
             /tmp/camera-viewer-app.tar.gz
@@ -99,8 +92,8 @@ jobs:
           ls -lh /tmp/cv-output/
           df -h .
 
-      # ── Crea release e pubblica ────────────────────────────────────────────
-      - name: Crea release se non esiste
+      # ── Crea release e pubblica ISO ────────────────────────────────────────
+      - name: Crea release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -109,39 +102,26 @@ jobs:
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --title "Camera Viewer v${VERSION}" \
-              --notes "$(printf '## Camera Viewer v%s\n\n> ⚠️ Limiti GitHub: il file è diviso in 2 parti (`.partaa` + `.partab`). Uniscile prima di flashare.\n\n### Come installare\n\n**Step 1 — Unisci le parti e scrivi su USB (Mac/Linux):**\n```bash\ncat camera-viewer-v%s.img.xz.partaa camera-viewer-v%s.img.xz.partab \\\n  | xzcat | sudo dd of=/dev/rdiskX bs=4m\n```\n\nOppure unisci prima, poi usa Balena Etcher:\n```bash\ncat camera-viewer-v%s.img.xz.part* > camera-viewer-v%s.img.xz\n# poi apri il file .img.xz con Etcher\n```\n\n**Step 2 — Boota il PC dalla USB**\n\n**Step 3 — Seleziona _Installa Camera Viewer_ nel menu GRUB**\n\n**Step 4 — Digita `INSTALLA` e attendi (5-15 min)**\n\n**Step 5 — Rimuovi la USB → il PC riavvia dal disco**\n\n### Primo accesso portale\n- URL: mostrato sullo schermo dopo il boot\n- Login: `admin` / `admin` (**cambia subito!**)' \
-                "$VERSION" "$VERSION" "$VERSION" "$VERSION" "$VERSION")"
+              --notes "$(printf '## Camera Viewer v%s\n\n### Come installare\n\n**Step 1 — Scarica** `camera-viewer-v%s.iso`\n\n**Step 2 — Scrivi su USB** (minimo 2GB)\n- [Balena Etcher](https://etcher.balena.io/) (Mac/Windows/Linux) — GUI\n- Rufus (Windows)\n- `sudo dd if=camera-viewer-v%s.iso of=/dev/sdX bs=4M status=progress` (Linux/Mac)\n\n**Step 3 — Boota il PC dalla USB** (UEFI o BIOS legacy)\n\n**Step 4 — Seleziona dal menu GRUB:**\n- _Avvia Camera Viewer (Live)_ — kiosk senza toccare il disco\n- _Installa Camera Viewer su disco_ — installa sul disco interno\n\n**Step 5 (solo installazione) — Digita `INSTALLA` e attendi (5-15 min)**\n\n**Step 6 (solo installazione) — Rimuovi USB → il PC riavvia dal disco**\n\n### Primo accesso portale\n- URL: mostrato sullo schermo dopo il boot\n- Login: `admin` / `admin` (**cambia subito!**)' \
+                "$VERSION" "$VERSION" "$VERSION")"
             echo "✓ Release $TAG creata"
           else
             echo "✓ Release $TAG già esistente"
           fi
 
-      # ── Split + upload ─────────────────────────────────────────────────────
-      # GitHub Release limit: 2GB per file.
-      # L'immagine xz-9 è ~2.2GB → split in due parti da ~1.1GB ciascuna.
-      # L'utente unisce prima di flashare:
-      #   cat *.partaa *.partab | xzcat | sudo dd of=/dev/rdiskX bs=4m
-      - name: Split e carica immagine sulla release
+      - name: Carica ISO sulla release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${{ github.event.inputs.version }}"
           TAG="v${VERSION}"
-          IMG="/tmp/cv-output/camera-viewer-v${VERSION}.img.xz"
-          # La directory è owned da root (build step usa sudo) — fix permessi
-          sudo chown -R "$USER" /tmp/cv-output/
-          IMG_SIZE=$(stat -c%s "$IMG")
-          echo "Immagine: $(ls -lh "$IMG" | awk '{print $5}') ($IMG_SIZE bytes)"
-          # Split in parti da 1900MB (< 2GB GitHub limit con margine)
-          split -b 1900m "$IMG" "${IMG}.part"
+          ISO="/tmp/cv-output/camera-viewer-v${VERSION}.iso"
+          sudo chown "$USER" "$ISO"
+          ISO_SIZE=$(ls -lh "$ISO" | awk '{print $5}')
+          echo "ISO: $ISO_SIZE"
+          gh release upload "$TAG" "$ISO" --clobber
           echo ""
-          echo "Parti create:"
-          ls -lh "${IMG}.part"*
+          echo "✅ Pubblicato: camera-viewer-v${VERSION}.iso (${ISO_SIZE})"
           echo ""
-          # Carica tutte le parti (di solito .partaa e .partab)
-          gh release upload "$TAG" "${IMG}.part"* --clobber
-          echo ""
-          echo "✅ Pubblicato: camera-viewer-v${VERSION}.img.xz.partaa + .partab"
-          echo ""
-          echo "Per scrivere la USB (Mac):"
-          echo "  cat camera-viewer-v${VERSION}.img.xz.part* | xzcat | sudo dd of=/dev/rdiskX bs=4m"
+          echo "Scrivi su USB (Linux/Mac):"
+          echo "  sudo dd if=camera-viewer-v${VERSION}.iso of=/dev/sdX bs=4M status=progress"
