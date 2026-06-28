@@ -94,6 +94,19 @@ apt-get install -y -q --no-install-recommends \
     live-boot live-boot-initramfs-tools \
     shim-signed grub-efi-amd64-signed
 KERNEL_VER=$(ls /boot/vmlinuz-*-generic 2>/dev/null | sort -V | tail -1 | sed 's|/boot/vmlinuz-||')
+
+# Hook initramfs: copia plymouth nell'initrd così live-boot non dà "not found"
+mkdir -p /usr/share/initramfs-tools/hooks
+cat > /usr/share/initramfs-tools/hooks/cv-plymouth << 'HOOK'
+#!/bin/sh
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0;; esac
+. /usr/share/initramfs-tools/hook-functions
+[ -x /usr/bin/plymouth ] && copy_exec /usr/bin/plymouth /bin/plymouth || true
+HOOK
+chmod +x /usr/share/initramfs-tools/hooks/cv-plymouth
+
 [ -n "$KERNEL_VER" ] && update-initramfs -u -k "$KERNEL_VER" 2>&1 | tail -3 || true
 apt-get clean
 
@@ -124,7 +137,12 @@ apt-get clean
 apt-get install -y -q --no-install-recommends \
     unclutter x11-xserver-utils feh xterm \
     pciutils net-tools iproute2 iptables \
-    htop nano parted e2fsprogs
+    htop nano parted e2fsprogs kbd
+apt-get clean
+
+# WiFi AP / hotspot (provisioning mode)
+apt-get install -y -q --no-install-recommends \
+    hostapd dnsmasq
 apt-get clean
 
 # Locale / Timezone
@@ -241,6 +259,10 @@ sudo -H -u pi .venv/bin/pip install flask -q --cache-dir /tmp/pip-cache
     install -m 755 raspberry/scripts/cv-vpn            /usr/local/sbin/cv-vpn
 [ -f raspberry/scripts/cv-ovpn ] && \
     install -m 755 raspberry/scripts/cv-ovpn           /usr/local/sbin/cv-ovpn
+[ -f raspberry/scripts/cv-bootmode ] && \
+    install -m 755 raspberry/scripts/cv-bootmode       /usr/local/sbin/cv-bootmode
+[ -f raspberry/scripts/cv-ap ] && \
+    install -m 755 raspberry/scripts/cv-ap             /usr/local/sbin/cv-ap
 [ -f raspberry/scripts/sudoers-cv-helpers ] && \
     install -m 440 raspberry/scripts/sudoers-cv-helpers /etc/sudoers.d/cv-helpers
 
@@ -281,18 +303,12 @@ cat > /etc/systemd/system/cv-installer.service << 'SVCEOF'
 [Unit]
 Description=Camera Viewer Installer
 ConditionKernelCommandLine=cv_install=1
-After=local-fs.target
-DefaultDependencies=no
+After=sysinit.target basic.target local-fs.target
 Conflicts=camera-bootmode.service camera-webconfig.service lightdm.service
 
 [Service]
 Type=oneshot
-ExecStartPre=/bin/chvt 1
-ExecStart=/usr/local/bin/install-camera-viewer.sh
-StandardInput=tty
-StandardOutput=tty
-StandardError=tty
-TTYPath=/dev/tty1
+ExecStart=/usr/bin/openvt -c 1 -s -w -- /usr/local/bin/install-camera-viewer.sh
 RemainAfterExit=yes
 
 [Install]
