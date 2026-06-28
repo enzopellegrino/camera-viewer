@@ -40,9 +40,20 @@ echo -e "  ${R}Il disco scelto verrà formattato. Tutti i dati esistenti saranno
 echo ""
 
 # ── Rileva disco sorgente (USB da cui stiamo bootando) ────────────────────────
+# In live-boot, / è overlayfs: findmnt restituisce "overlay", non una partizione.
+# Cerchiamo il medium live nei mount point noti di live-boot.
 ROOT_DEV=$(findmnt -n -o SOURCE / | sed 's/\[.*//')
 ROOT_DISK=$(lsblk -no PKNAME "$ROOT_DEV" 2>/dev/null || echo "")
-echo -e "  Sistema sorgente (USB): ${B}/dev/${ROOT_DISK}${E}"
+if [[ -z "$ROOT_DISK" ]]; then
+    for MNTPT in /run/live/medium /usr/lib/live/mount/medium; do
+        LIVE_DEV=$(findmnt -n -o SOURCE "$MNTPT" 2>/dev/null || true)
+        if [[ -n "$LIVE_DEV" ]]; then
+            ROOT_DISK=$(lsblk -no PKNAME "$LIVE_DEV" 2>/dev/null || echo "")
+            [[ -n "$ROOT_DISK" ]] && break
+        fi
+    done
+fi
+echo -e "  Sistema sorgente (USB): ${B}/dev/${ROOT_DISK:-sconosciuto}${E}"
 echo ""
 
 # ── Lista dischi interni disponibili ──────────────────────────────────────────
@@ -57,6 +68,9 @@ while IFS= read -r line; do
     [[ "$DISK_NAME" == "$ROOT_DISK" ]] && continue
     [[ "$DEV" == *loop* ]] && continue
     [[ "$DEV" == *sr* ]] && continue
+    # Exclude USB transport disks (extra safety net if ROOT_DISK detection failed)
+    TRAN=$(lsblk -dno TRAN "$DEV" 2>/dev/null || echo "")
+    [[ "$TRAN" == "usb" ]] && continue
     SIZE=$(echo "$line" | awk '{print $2}')
     MODEL=$(echo "$line" | awk '{$1=$2=""; print}' | xargs)
     echo -e "    ${B}[$IDX]${E} $DEV — $SIZE — $MODEL"
