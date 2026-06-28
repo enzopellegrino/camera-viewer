@@ -1,0 +1,184 @@
+name: Build macOS DMG
+
+# Costruisce, firma e notarizza il DMG macOS su GitHub Actions.
+#
+# Secrets richiesti (Settings → Secrets → Actions):
+#   MACOS_CERTIFICATE_P12      — certificato Developer ID esportato come base64
+#                                 openssl base64 -in certificate.p12 | pbcopy
+#   MACOS_CERTIFICATE_PASSWORD — password del .p12
+#   MACOS_NOTARY_APPLE_ID      — Apple ID (es. enzo@example.com)
+#   MACOS_NOTARY_PASSWORD      — app-specific password (appleid.apple.com → Sicurezza)
+#   MACOS_TEAM_ID              — Team ID (es. T4T6H838Y2)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installa dipendenze Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── Importa certificato Developer ID nel keychain CI ──────────────────
+      - name: Importa certificato di firma
+        env:
+          CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          echo "$CERTIFICATE_P12" | base64 --decode > /tmp/certificate.p12
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import /tmp/certificate.p12 \
+            -k build.keychain \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" \
+            build.keychain
+
+          rm /tmp/certificate.p12
+          echo "✓ Certificato importato"
+
+      # ── Configura credenziali notarizzazione ──────────────────────────────
+      - name: Configura notarizzazione
+        env:
+          APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
+        run: |
+          xcrun notarytool store-credentials "ci-notary" \
+            --apple-id "$APPLE_ID" \
+            --password "$NOTARY_PASSWORD" \
+            --team-id "$TEAM_ID"
+          echo "✓ Credenziali notarizzazione configurate"
+
+      # ── Build app ─────────────────────────────────────────────────────────
+      - name: Build Camera Viewer.app
+        run: |
+          pyinstaller camera_viewer.spec --noconfirm
+          echo "✓ App bundle creato: $(du -sh 'dist/Camera Viewer.app' | cut -f1)"
+
+      # ── Firma profonda ────────────────────────────────────────────────────
+      - name: Firma app (deep sign)
+        env:
+          DEVELOPER_ID: "Developer ID Application: Enzo Pellegrino (${{ secrets.MACOS_TEAM_ID }})"
+        run: |
+          APP="dist/Camera Viewer.app"
+          ENTITLEMENTS="entitlements.plist"
+
+          xattr -cr "$APP"
+
+          # Firma tutti i binari e librerie interni
+          find "$APP/Contents/MacOS" -type f | while read bin; do
+            codesign --force --options runtime \
+              --entitlements "$ENTITLEMENTS" \
+              --sign "$DEVELOPER_ID" \
+              "$bin" 2>/dev/null || true
+          done
+          find "$APP/Contents/Frameworks" \( -name "*.dylib" -o -name "*.so" \) | while read lib; do
+            codesign --force --options runtime \
+              --entitlements "$ENTITLEMENTS" \
+              --sign "$DEVELOPER_ID" \
+              "$lib" 2>/dev/null || true
+          done
+
+          # Firma il bundle
+          codesign --force --deep --options runtime \
+            --entitlements "$ENTITLEMENTS" \
+            --sign "$DEVELOPER_ID" \
+            --identifier "com.enzo.camera-viewer" \
+            "$APP"
+
+          codesign --verify --deep --strict "$APP"
+          echo "✓ Firma verificata"
+
+      # ── Notarizzazione app ────────────────────────────────────────────────
+      - name: Notarizza app
+        run: |
+          APP="dist/Camera Viewer.app"
+          ditto -c -k --keepParent "$APP" /tmp/camera-viewer-notarize.zip
+          xcrun notarytool submit /tmp/camera-viewer-notarize.zip \
+            --keychain-profile "ci-notary" \
+            --wait \
+            --timeout 600
+          rm /tmp/camera-viewer-notarize.zip
+          xcrun stapler staple "$APP"
+          echo "✓ App notarizzata e stapled"
+
+      # ── Crea DMG ──────────────────────────────────────────────────────────
+      - name: Crea DMG
+        run: |
+          APP="dist/Camera Viewer.app"
+          DMG="dist/Camera Viewer.dmg"
+          STAGING="/tmp/cv-dmg-staging"
+
+          rm -rf "$STAGING"
+          mkdir -p "$STAGING"
+          cp -R "$APP" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+
+          hdiutil create \
+            -volname "Camera Viewer" \
+            -srcfolder "$STAGING" \
+            -ov \
+            -format UDZO \
+            "$DMG"
+          rm -rf "$STAGING"
+          echo "✓ DMG creato: $(du -sh "$DMG" | cut -f1)"
+
+      # ── Firma + notarizza DMG ──────────────────────────────────────────────
+      - name: Firma e notarizza DMG
+        env:
+          DEVELOPER_ID: "Developer ID Application: Enzo Pellegrino (${{ secrets.MACOS_TEAM_ID }})"
+        run: |
+          DMG="dist/Camera Viewer.dmg"
+          codesign --force --sign "$DEVELOPER_ID" "$DMG"
+          xcrun notarytool submit "$DMG" \
+            --keychain-profile "ci-notary" \
+            --wait \
+            --timeout 600
+          xcrun stapler staple "$DMG"
+          echo "✓ DMG firmato, notarizzato e stapled"
+
+      # ── Pubblica su GitHub Release ─────────────────────────────────────────
+      - name: Pubblica su GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          DMG="dist/Camera Viewer.dmg"
+          SIZE=$(du -sh "$DMG" | cut -f1)
+
+          gh release delete latest-mac --yes 2>/dev/null || true
+          gh release create latest-mac "$DMG" \
+            --title "Camera Viewer macOS — Ultima versione" \
+            --notes "Build automatica — commit ${{ github.sha }}
+
+          ### Installazione
+          1. Scarica \`Camera Viewer.dmg\`
+          2. Apri il DMG
+          3. Trascina **Camera Viewer** in **Applications**
+          4. Avvia dall'app → nessun warning (firmato e notarizzato Apple)" \
+            --latest
+          echo "✓ Pubblicato: $DMG ($SIZE)"
