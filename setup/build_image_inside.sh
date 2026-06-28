@@ -498,7 +498,7 @@ menuentry "  Avvia Camera Viewer v${VERSION} (Live)" {
 }
 menuentry "  Installa Camera Viewer v${VERSION} su disco interno" {
     search --no-floppy --label --set=root CV-LIVE
-    linux  /live/vmlinuz boot=live quiet loglevel=3 label=CV-LIVE cv_install=1 systemd.unit=multi-user.target
+    linux  /live/vmlinuz boot=live loglevel=3 label=CV-LIVE cv_install=1 systemd.unit=multi-user.target
     initrd /live/initrd.img
 }
 menuentry "  Modalita sicura (nomodeset)" {
