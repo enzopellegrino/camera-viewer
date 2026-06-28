@@ -21,6 +21,7 @@ import json
 import os
 import pwd
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -52,6 +53,34 @@ def should_provision() -> bool:
     return len(cfg.get("cameras", [])) == 0
 
 
+def has_network(timeout: int = 15) -> bool:
+    """Return True if an active wired or WiFi-client connection is found within timeout seconds.
+
+    Polls NetworkManager every 2 s. Excludes the cv-ap connection so the AP
+    itself is never counted as "having network".
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            result = subprocess.run(
+                ["nmcli", "-t", "-f", "NAME,TYPE,STATE", "con", "show", "--active"],
+                capture_output=True, text=True, check=False,
+            )
+            for line in result.stdout.splitlines():
+                parts = line.split(":", 2)
+                if len(parts) < 3:
+                    continue
+                name, kind, state = parts
+                if name == "cv-ap":
+                    continue
+                if kind in ("802-3-ethernet", "wifi") and state == "activated":
+                    return True
+        except Exception:
+            pass
+        time.sleep(2)
+    return False
+
+
 def run(*args: str) -> None:
     subprocess.run(list(args), check=False)
 
@@ -60,7 +89,7 @@ def main() -> None:
     # Note: the graphical viewer is started by the desktop session autostart
     # (cv-viewer-launch), which needs access to the user's Wayland display.
     # Here we only toggle the Access Point.
-    if should_provision():
+    if should_provision() or not has_network():
         run("/usr/local/sbin/cv-ap", "start")
         print("MODE=provisioning")
     else:
