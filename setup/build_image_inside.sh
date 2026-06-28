@@ -305,17 +305,16 @@ cat > /etc/systemd/system/cv-installer.service << 'SVCEOF'
 Description=Camera Viewer Installer
 ConditionKernelCommandLine=cv_install=1
 After=sysinit.target basic.target local-fs.target
-Conflicts=camera-bootmode.service camera-webconfig.service lightdm.service
+Conflicts=camera-bootmode.service camera-webconfig.service lightdm.service getty@tty1.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/install-camera-viewer.sh
-StandardInput=tty-force
+StandardInput=tty
 StandardOutput=tty
 StandardError=tty
 TTYPath=/dev/tty1
 TTYReset=yes
-TTYVHangup=yes
 RemainAfterExit=yes
 
 [Install]
