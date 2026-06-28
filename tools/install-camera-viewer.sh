@@ -161,7 +161,7 @@ rsync -aAX --delete --info=progress2 \
     --exclude='/proc/*'     --exclude='/sys/*'    --exclude='/dev/*' \
     --exclude='/run/*'      --exclude='/tmp/*'    --exclude='/mnt/*' \
     --exclude='/media/*'    --exclude='/data/*'   --exclude='/swap.img' \
-    --exclude='/boot/efi/*' \
+    --exclude='/boot/efi' \
     --exclude='/home/pi/.config/camera-viewer/*' \
     / "$MNT/"
 echo ""
