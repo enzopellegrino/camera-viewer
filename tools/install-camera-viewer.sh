@@ -240,18 +240,21 @@ for d in dev dev/pts proc sys run; do
     mount --bind "/$d" "$MNT/$d" 2>/dev/null || true
 done
 
+# Remove live-boot initramfs hook directly on the installed filesystem.
+# apt-get purge inside chroot is unreliable (no set -e, dpkg locks, pre-rm scripts).
+# Deleting the hook file before update-initramfs is simpler and guaranteed.
+rm -f "$MNT/usr/share/initramfs-tools/hooks/live"
+
 chroot "$MNT" bash -c "
-# live-boot adds initramfs hooks that look for a squashfs live medium at boot.
-# On an installed system (no USB) the hooks fail and the kernel reboots in a loop.
-DEBIAN_FRONTEND=noninteractive apt-get purge -y \
-    live-boot live-boot-initramfs-tools 2>/dev/null || true
-update-initramfs -u -k all
+set -eo pipefail
+echo '  Rebuilding initramfs without live-boot...'
+update-initramfs -u -k all 2>&1 | tail -3
 grub-install --target=x86_64-efi \
     --efi-directory=/boot/efi \
     --boot-directory=/boot \
     --removable --recheck 2>&1 | tail -2
-# Remove 'splash' from cmdline: Plymouth is not present on the installed disk.
-sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"quiet loglevel=3\"/' \
+# nosplash: prevents Plymouth black screen on systems without GPU driver loaded early.
+sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"quiet loglevel=3 nosplash\"/' \
     /etc/default/grub
 update-grub 2>&1 | grep -E 'Found|done|Generating' | head -5
 echo GRUB_OK
