@@ -18,7 +18,7 @@ _cleanup() {
     local EXIT=$?
     [ $EXIT -eq 0 ] && return
     echo -e "\n  ${R}${B}Errore durante l'installazione — smontaggio dischi...${E}"
-    for d in run sys proc dev/pts dev boot/efi; do
+    for d in run sys proc dev/pts dev boot/efi data; do
         umount "$MNT/$d" 2>/dev/null || true
     done
     umount "$MNT" 2>/dev/null || true
@@ -192,7 +192,10 @@ if [ -f "$MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf" ]; then
 fi
 
 # Config iniziale pulita: admin/admin + must_change_password
-mkdir -p "$MNT${KIOSK_HOME}/.config/camera-viewer"
+# /home/pi/.config/camera-viewer è un symlink → /data/camera-viewer (assoluto).
+# Montiamo la partizione dati e scriviamo il config direttamente lì.
+mount "$P3" "$MNT/data"
+mkdir -p "$MNT/data/camera-viewer"
 python3 -c "
 import json, uuid
 try:
@@ -214,8 +217,9 @@ cfg = {
 json.dump(cfg, open('/tmp/cv-init-config.json', 'w'), indent=2)
 print('  Config creato.')
 "
-cp /tmp/cv-init-config.json "$MNT${KIOSK_HOME}/.config/camera-viewer/config.json"
-chown -R 1000:1000 "$MNT${KIOSK_HOME}/.config/camera-viewer/"
+cp /tmp/cv-init-config.json "$MNT/data/camera-viewer/config.json"
+chown -R 1000:1000 "$MNT/data/camera-viewer/"
+umount "$MNT/data"
 
 # Patch camera-webconfig.service: sostituisci KIOSK_USER_PLACEHOLDER con l'utente reale
 if [ -f "$MNT/etc/systemd/system/camera-webconfig.service" ]; then
