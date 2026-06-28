@@ -493,12 +493,12 @@ ok "GRUB config creato"
 #   - BIOS legacy (grub-pc embedded MBR)
 #   - Hybrid MBR: la ISO si può scrivere su USB con dd/Etcher/Rufus
 log "Creazione ISO ibrida UEFI+BIOS (grub-mkrescue)..."
+# grub-mkrescue non accetta --modules (quello è grub-mkimage).
+# Il -- passa opzioni direttamente a xorriso per il volume label.
 grub-mkrescue \
     --output="$ISO_FILE" \
-    --modules="part_gpt part_msdos fat ext2 normal boot linux search search_label echo all_video video_fb" \
     "$STAGING" \
-    -- -volid "CV-LIVE" -joliet -joliet-long -rational-rock \
-    2>/dev/null
+    -- -volid "CV-LIVE"
 ISO_SIZE=$(ls -lh "$ISO_FILE" | awk '{print $5}')
 ok "ISO creata: $ISO_SIZE"
 
