@@ -153,6 +153,7 @@ class GridWidget(QWidget):
         target = self._single
         self._single = None
         target._hw_decode = False
+        target.reset_video_zoom()  # reset zoom/pan prima di tornare alla griglia
         idx = self._widgets.index(target)
         row = idx // self._cols
         col = idx % self._cols
