@@ -169,6 +169,11 @@ mount "$P2" "$MNT"
 mkdir -p "$MNT/boot/efi"
 mount "$P1" "$MNT/boot/efi"
 mkdir -p "$MNT/data"
+# Monta la partizione dati del DISCO installato — necessario per scrivere
+# config.json nel posto giusto. Senza questo mount, la symlink
+# /home/pi/.config/camera-viewer → /data/camera-viewer viene seguita
+# nell'ambiente della USB anziché del disco installato.
+mount "$P3" "$MNT/data"
 
 # ── Copia sistema ─────────────────────────────────────────────────────────────
 echo "  [4/6] Copia sistema (5-15 minuti, dipende dal disco)..."
@@ -207,9 +212,14 @@ if [ -f "$MNT/etc/lightdm/lightdm.conf.d/50-autologin.conf" ]; then
 fi
 
 # Config iniziale pulita: admin/admin + must_change_password
+<<<<<<< HEAD
 # /home/pi/.config/camera-viewer è un symlink → /data/camera-viewer (assoluto).
 # Montiamo la partizione dati e scriviamo il config direttamente lì.
 mount "$P3" "$MNT/data"
+=======
+# IMPORTANTE: scrive su /data/camera-viewer della partizione dati INSTALLATA
+# (già montata a $MNT/data), NON segue la symlink nell'ambiente della USB.
+>>>>>>> 9a1ea17 (NOTICK fix(kiosk): fix black screen after install)
 mkdir -p "$MNT/data/camera-viewer"
 python3 -c "
 import json, uuid
@@ -234,7 +244,11 @@ print('  Config creato.')
 "
 cp /tmp/cv-init-config.json "$MNT/data/camera-viewer/config.json"
 chown -R 1000:1000 "$MNT/data/camera-viewer/"
+<<<<<<< HEAD
 umount "$MNT/data"
+=======
+echo "  ✓ config.json scritto su partizione dati del disco installato"
+>>>>>>> 9a1ea17 (NOTICK fix(kiosk): fix black screen after install)
 
 # Patch camera-webconfig.service: sostituisci KIOSK_USER_PLACEHOLDER con l'utente reale
 if [ -f "$MNT/etc/systemd/system/camera-webconfig.service" ]; then
@@ -327,6 +341,7 @@ done
 
 umount "$MNT/sys/firmware/efi/efivars" 2>/dev/null || true
 for d in run sys proc dev/pts dev; do umount "$MNT/$d" 2>/dev/null || true; done
+umount "$MNT/data"
 umount "$MNT/boot/efi"
 umount "$MNT"
 
