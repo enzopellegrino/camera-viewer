@@ -337,6 +337,10 @@ class MainWindow(QMainWindow):
         self._touch_start_x: float | None = None
         self._pinch_start_dist: float | None = None
         self._pinch_start_zoom: float = 0.0
+        self._pinch_start_pan_x: float = 0.0
+        self._pinch_start_pan_y: float = 0.0
+        self._pinch_center_x: float = 0.0   # punto medio pinch, norm. [-0.5, 0.5]
+        self._pinch_center_y: float = 0.0
         self._root_vbox = QVBoxLayout(root)
         self._root_vbox.setContentsMargins(0, 0, 0, 0)
         self._root_vbox.setSpacing(0)
@@ -672,15 +676,31 @@ class MainWindow(QMainWindow):
                     # Secondo dito appena aggiunto: inizializza pinch
                     self._pinch_start_dist = self._touch_dist(pts[0], pts[1])
                     self._pinch_start_zoom = cam._video_zoom
+                    self._pinch_start_pan_x = cam._video_pan_x
+                    self._pinch_start_pan_y = cam._video_pan_y
+                    # Punto medio delle dita, normalizzato a [-0.5, 0.5]
+                    mx = (pts[0].position().x() + pts[1].position().x()) / 2
+                    my = (pts[0].position().y() + pts[1].position().y()) / 2
+                    self._pinch_center_x = mx / max(cam.width(), 1) - 0.5
+                    self._pinch_center_y = my / max(cam.height(), 1) - 0.5
                     self._touch_start_x = None   # annulla swipe
                 else:
-                    # Pinch in corso: aggiorna video-zoom di mpv
+                    # Pinch in corso: zoom + pan centrato sul punto di pizzico
                     dist = self._touch_dist(pts[0], pts[1])
                     if self._pinch_start_dist > 0:
                         import math
                         scale = dist / self._pinch_start_dist
-                        zoom = self._pinch_start_zoom + math.log2(max(scale, 0.01))
-                        cam.set_video_zoom(zoom)
+                        new_zoom = self._pinch_start_zoom + math.log2(max(scale, 0.01))
+                        new_zoom = max(-1.0, min(4.0, new_zoom))
+                        # Quanto è cambiata la scala rispetto all'inizio del pinch
+                        s = 2 ** (new_zoom - self._pinch_start_zoom)
+                        cx = self._pinch_center_x
+                        cy = self._pinch_center_y
+                        # Pan per tenere fisso il punto di pizzico:
+                        # new_pan = cx - (cx - start_pan) * s
+                        pan_x = cx - (cx - self._pinch_start_pan_x) * s
+                        pan_y = cy - (cy - self._pinch_start_pan_y) * s
+                        cam.set_video_zoom(new_zoom, pan_x, pan_y)
             elif len(pts) == 1 and self._touch_start_x is not None:
                 if len(self.config.screens) > 1:
                     self._switcher.expand_temporarily()

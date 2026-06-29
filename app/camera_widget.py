@@ -102,6 +102,8 @@ class CameraWidget(QWidget):
         self._started = False
         self._hw_decode = False  # SW decode in grid; HW when focused/fullscreen
         self._video_zoom: float = 0.0   # mpv video-zoom (0=1x, 1=2x, log2 scale)
+        self._video_pan_x: float = 0.0  # mpv video-pan-x (frazione video scalato)
+        self._video_pan_y: float = 0.0  # mpv video-pan-y
         cam_id = camera_config.get("id", id(self))
         self._ipc_path = f"/tmp/mpv-cam-{cam_id}.sock"
 
@@ -206,7 +208,9 @@ class CameraWidget(QWidget):
         self._show_placeholder()
 
         self._kill_proc()
-        self._video_zoom = 0.0  # reset zoom ad ogni riavvio stream
+        self._video_zoom = 0.0   # reset zoom/pan ad ogni riavvio stream
+        self._video_pan_x = 0.0
+        self._video_pan_y = 0.0
 
         passphrase = self.camera_config.get("passphrase", "").strip()
         cmd = _mpv_command(url, int(self.winId()), self._ipc_path, passphrase, self._hw_decode)
@@ -260,15 +264,25 @@ class CameraWidget(QWidget):
 
     # ── Public API (used by main.py) ──────────────────────────────────────────
 
-    def set_video_zoom(self, zoom: float):
-        """Imposta il livello di zoom video mpv (0=1x, 1=2x, scala log2). Clampato tra -1 e 4."""
+    def set_video_zoom(self, zoom: float, pan_x: float = None, pan_y: float = None):
+        """Imposta zoom e (opzionale) pan video mpv. zoom in scala log2 (0=1x, 1=2x)."""
         self._video_zoom = max(-1.0, min(4.0, zoom))
         self._mpv_set_property("video-zoom", self._video_zoom)
+        if pan_x is not None:
+            self._video_pan_x = pan_x
+            self._mpv_set_property("video-pan-x", self._video_pan_x)
+        if pan_y is not None:
+            self._video_pan_y = pan_y
+            self._mpv_set_property("video-pan-y", self._video_pan_y)
 
     def reset_video_zoom(self):
-        """Riporta lo zoom a 1x."""
+        """Riporta zoom e pan a 1x/centro."""
         self._video_zoom = 0.0
+        self._video_pan_x = 0.0
+        self._video_pan_y = 0.0
         self._mpv_set_property("video-zoom", 0.0)
+        self._mpv_set_property("video-pan-x", 0.0)
+        self._mpv_set_property("video-pan-y", 0.0)
 
     def _mpv_set_property(self, prop: str, value):
         """Invia un comando IPC a mpv via Unix socket (non bloccante)."""
