@@ -262,39 +262,51 @@ fi
 # expecting a live USB medium to be present.
 rm -f "$MNT/usr/share/initramfs-tools/hooks/live"
 
-# Ensure grub-mkconfig uses the correct root UUID even if grub-probe fails
-# inside the chroot (it reads /proc/mounts from the host and may not resolve
-# the chroot root to the correct block device).
-# Delete any existing line then always append — sed exits 0 even on no-match,
-# so `sed || echo` would silently skip the append when the line is absent.
-sed -i '/^GRUB_CMDLINE_LINUX=/d' "$MNT/etc/default/grub"
-echo "GRUB_CMDLINE_LINUX=\"root=UUID=$SYS_UUID\"" >> "$MNT/etc/default/grub"
-
-# Provide a device.map so grub-probe can find the root device inside the chroot
-mkdir -p "$MNT/boot/grub"
-echo "(hd0) $TARGET" > "$MNT/boot/grub/device.map"
-
 for d in dev dev/pts proc sys run; do
     mount --bind "/$d" "$MNT/$d" 2>/dev/null || true
 done
 
+# Only update-initramfs is needed inside the chroot: it regenerates the
+# initramfs without the live-boot hooks so the installed system mounts root
+# from disk (root=UUID=...) instead of expecting a live USB medium.
+# grub.cfg is written from outside the chroot (see below) so we skip
+# update-grub entirely — grub-probe inside a chroot reads /proc/mounts from
+# the host and often returns the wrong UUID, producing an unbootable config.
 chroot "$MNT" bash -c "
 set -eo pipefail
 echo '  Rigenerazione initramfs senza live-boot...'
 update-initramfs -u -k all 2>&1 | tail -3
-# nosplash: evita lo schermo nero di Plymouth.
-# GRUB_TERMINAL=console: forza menu GRUB in modalità testo VGA — visibile
-# su qualsiasi hardware anche se gfxterm non si inizializza.
-sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT=.*/GRUB_CMDLINE_LINUX_DEFAULT=\"quiet loglevel=3 nosplash\"/' \
-    /etc/default/grub
-grep -q '^GRUB_TERMINAL' /etc/default/grub \
-    || echo 'GRUB_TERMINAL=console' >> /etc/default/grub
-update-grub > /tmp/cv-update-grub.log 2>&1
-grep -E 'Found|done|Generating' /tmp/cv-update-grub.log | head -5 || true
-echo GRUB_OK
+echo '  ✓ initramfs rigenerato'
 "
 
 for d in run sys proc dev/pts dev; do umount "$MNT/$d" 2>/dev/null || true; done
+
+# Write grub.cfg directly from the installer — no update-grub, no grub-probe.
+# We already know: the root UUID (SYS_UUID), the label (cv-system), and we can
+# detect the exact kernel/initrd filenames from the installed /boot/ directory.
+_k=$(ls "$MNT/boot/vmlinuz-"*-generic 2>/dev/null | sort -V | tail -1)
+KERNEL_FILE="${_k#"$MNT"}"
+_i=$(ls "$MNT/boot/initrd.img-"*-generic 2>/dev/null | sort -V | tail -1)
+INITRD_FILE="${_i#"$MNT"}"
+unset _k _i
+
+if [[ -z "$KERNEL_FILE" || -z "$INITRD_FILE" ]]; then
+    echo -e "  ${R}ERRORE: kernel o initrd non trovati in $MNT/boot/ — impossibile completare.${E}"
+    exit 1
+fi
+
+mkdir -p "$MNT/boot/grub"
+cat > "$MNT/boot/grub/grub.cfg" << EOFCFG
+set default=0
+set timeout=5
+
+menuentry "Camera Viewer" {
+    search --no-floppy --label --set=root cv-system
+    linux $KERNEL_FILE root=UUID=$SYS_UUID ro quiet loglevel=3 nosplash
+    initrd $INITRD_FILE
+}
+EOFCFG
+echo "  ✓ grub.cfg scritto (kernel: $(basename "$KERNEL_FILE"))"
 
 # Build a standalone GRUB EFI binary on the live host — no chroot, no
 # grub-probe device detection. grub-mkstandalone embeds the search-by-label
