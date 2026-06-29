@@ -493,20 +493,24 @@ class MainWindow(QMainWindow):
         self._switcher.set_active(self._current_idx)
 
     def _prev_screen(self):
+        # In single-cam mode: cicla sulla telecamera precedente nella stessa vista
+        if self._single_cam_mode and self._grid:
+            self._grid.prev_single_cam()
+            return
         n = len(self.config.screens)
         if n <= 1:
             return
-        if self._single_cam_mode:
-            self._exit_single_cam()
         self._load_screen((self._current_idx - 1) % n)
         self._switcher.expand_temporarily()
 
     def _next_screen(self):
+        # In single-cam mode: cicla sulla telecamera successiva nella stessa vista
+        if self._single_cam_mode and self._grid:
+            self._grid.next_single_cam()
+            return
         n = len(self.config.screens)
         if n <= 1:
             return
-        if self._single_cam_mode:
-            self._exit_single_cam()
         self._load_screen((self._current_idx + 1) % n)
         self._switcher.expand_temporarily()
 

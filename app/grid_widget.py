@@ -106,6 +106,30 @@ class GridWidget(QWidget):
     def exit_single_cam(self):
         self._exit_single_cam_internal()
 
+    def next_single_cam(self) -> bool:
+        """Zoom sulla telecamera successiva (ciclico). Ritorna True se eseguito."""
+        if not self._widgets:
+            return False
+        if self._single is None:
+            return False
+        idx = (self._widgets.index(self._single) + 1) % len(self._widgets)
+        target = self._widgets[idx]
+        self._exit_single_cam_internal()
+        self.enter_single_cam(target)
+        return True
+
+    def prev_single_cam(self) -> bool:
+        """Zoom sulla telecamera precedente (ciclico). Ritorna True se eseguito."""
+        if not self._widgets:
+            return False
+        if self._single is None:
+            return False
+        idx = (self._widgets.index(self._single) - 1) % len(self._widgets)
+        target = self._widgets[idx]
+        self._exit_single_cam_internal()
+        self.enter_single_cam(target)
+        return True
+
     def _exit_single_cam_internal(self):
         if self._single is None:
             return
