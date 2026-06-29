@@ -331,8 +331,10 @@ class MainWindow(QMainWindow):
 
         root = QWidget()
         root.setMouseTracking(True)
+        root.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.setMouseTracking(True)
         self.setCentralWidget(root)
+        self._touch_start_x: float | None = None
         self._root_vbox = QVBoxLayout(root)
         self._root_vbox.setContentsMargins(0, 0, 0, 0)
         self._root_vbox.setSpacing(0)
@@ -629,15 +631,47 @@ class MainWindow(QMainWindow):
     # ── Mouse / resize (scene switcher) ──────────────────────────────────────
 
     def eventFilter(self, obj, event):
-        """Cattura rotella del mouse da qualsiasi widget → cambia vista."""
+        """Cattura rotella del mouse e swipe touch → cambia vista."""
         from PySide6.QtCore import QEvent
-        if event.type() == QEvent.Wheel and len(self.config.screens) > 1:
+        et = event.type()
+
+        # ── Rotella del mouse ─────────────────────────────────────────────────
+        if et == QEvent.Wheel and len(self.config.screens) > 1:
             delta = event.angleDelta().y()
             if delta > 0:
                 self._prev_screen()
             elif delta < 0:
                 self._next_screen()
-            return True   # evento consumato, non fa scroll su altro
+            return True   # evento consumato
+
+        # ── Touch swipe orizzontale ───────────────────────────────────────────
+        if et == QEvent.TouchBegin:
+            pts = event.points()
+            if pts:
+                self._touch_start_x = pts[0].position().x()
+            return False  # non consumare: lascia propagare tap/click
+
+        if et == QEvent.TouchUpdate:
+            # Mostra la barra switcher mentre l'utente scorre
+            if self._touch_start_x is not None and len(self.config.screens) > 1:
+                self._switcher.expand_temporarily()
+            return False
+
+        if et == QEvent.TouchEnd:
+            if self._touch_start_x is not None and len(self.config.screens) > 1:
+                pts = event.points()
+                if pts:
+                    delta_x = pts[0].position().x() - self._touch_start_x
+                    if abs(delta_x) > 80:          # soglia minima swipe (px)
+                        if delta_x < 0:
+                            self._next_screen()    # swipe ← → vista successiva
+                        else:
+                            self._prev_screen()    # swipe → → vista precedente
+                        self._touch_start_x = None
+                        return True
+            self._touch_start_x = None
+            return False
+
         return False
 
     def mouseMoveEvent(self, event):
