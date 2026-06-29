@@ -130,6 +130,7 @@ class GridWidget(QWidget):
         prev_idx = self._widgets.index(prev)
         self._grid.addWidget(prev, prev_idx // self._cols, prev_idx % self._cols)
         prev._hw_decode = False
+        prev.reset_video_zoom()  # reset zoom quando si lascia la cam
 
         # Porta target in fullscreen direttamente
         self._single = target

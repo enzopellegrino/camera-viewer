@@ -335,6 +335,8 @@ class MainWindow(QMainWindow):
         self.setMouseTracking(True)
         self.setCentralWidget(root)
         self._touch_start_x: float | None = None
+        self._pinch_start_dist: float | None = None
+        self._pinch_start_zoom: float = 0.0
         self._root_vbox = QVBoxLayout(root)
         self._root_vbox.setContentsMargins(0, 0, 0, 0)
         self._root_vbox.setSpacing(0)
@@ -652,20 +654,38 @@ class MainWindow(QMainWindow):
                 self._next_screen()
             return True   # evento consumato
 
-        # ── Touch swipe orizzontale ───────────────────────────────────────────
+        # ── Touch: pinch (2 dita) e swipe (1 dito) ───────────────────────────
         if et == QEvent.TouchBegin:
             pts = event.points()
-            if pts:
+            if len(pts) == 2 and self._single_cam_mode:
+                # Inizio pinch: registra distanza iniziale e zoom corrente
+                self._pinch_start_dist = self._touch_dist(pts[0], pts[1])
+                cam = self._grid._single if self._grid else None
+                self._pinch_start_zoom = cam._video_zoom if cam else 0.0
+                self._touch_start_x = None  # disabilita swipe durante pinch
+            elif len(pts) == 1:
                 self._touch_start_x = pts[0].position().x()
-            return False  # non consumare: lascia propagare tap/click
+                self._pinch_start_dist = None
+            return False
 
         if et == QEvent.TouchUpdate:
-            # Mostra la barra switcher mentre l'utente scorre
-            if self._touch_start_x is not None and len(self.config.screens) > 1:
-                self._switcher.expand_temporarily()
+            pts = event.points()
+            cam = self._grid._single if (self._grid and self._single_cam_mode) else None
+            if len(pts) == 2 and self._pinch_start_dist and cam:
+                # Pinch in corso: aggiorna video-zoom di mpv
+                dist = self._touch_dist(pts[0], pts[1])
+                if self._pinch_start_dist > 0:
+                    import math
+                    scale = dist / self._pinch_start_dist
+                    zoom = self._pinch_start_zoom + math.log2(max(scale, 0.01))
+                    cam.set_video_zoom(zoom)
+            elif len(pts) == 1 and self._touch_start_x is not None:
+                if len(self.config.screens) > 1:
+                    self._switcher.expand_temporarily()
             return False
 
         if et == QEvent.TouchEnd:
+            self._pinch_start_dist = None
             if self._touch_start_x is not None and len(self.config.screens) > 1:
                 pts = event.points()
                 if pts:
@@ -759,6 +779,13 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     # ----------------------------------------------------------- helpers
+
+    @staticmethod
+    def _touch_dist(p1, p2) -> float:
+        """Distanza euclidea tra due QEventPoint."""
+        dx = p1.position().x() - p2.position().x()
+        dy = p1.position().y() - p2.position().y()
+        return (dx * dx + dy * dy) ** 0.5
 
     @staticmethod
     def _is_raspberry_pi() -> bool:
