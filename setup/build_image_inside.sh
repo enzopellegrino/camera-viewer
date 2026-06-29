@@ -89,9 +89,13 @@ echo "deb http://security.ubuntu.com/ubuntu noble-security main universe" >> /et
 apt-get update -q
 
 # Kernel + live-boot (essenziale: gestisce mount squashfs + overlayfs)
-# efibootmgr: serve a grub-install per creare la voce di boot nella NVRAM UEFI.
+# linux-firmware: firmware WiFi (iwlwifi Intel, ath*, rtw*, mt*, brcm*, ...).
+#   Senza questo pacchetto il kernel carica il driver ma non trova il firmware
+#   → la scheda WiFi non appare a NetworkManager → cv-ap non può avviare
+#   l'hotspot di provisioning quando non c'è ethernet.
+# efibootmgr: usato dall'installer (grub-mkstandalone path) per la NVRAM UEFI.
 apt-get install -y -q --no-install-recommends \
-    linux-image-generic initramfs-tools \
+    linux-image-generic initramfs-tools linux-firmware \
     live-boot live-boot-initramfs-tools \
     shim-signed grub-efi-amd64-signed \
     efibootmgr
