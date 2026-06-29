@@ -720,7 +720,10 @@ class MainWindow(QMainWindow):
 
     def _enter_kiosk(self):
         self.showFullScreen()
-        self.setCursor(Qt.BlankCursor)
+        # Nasconde il cursore a livello di QApplication — sovrascrive qualsiasi
+        # widget figlio e non viene resettato dagli eventi touch sintetici su X11.
+        from PySide6.QtWidgets import QApplication as _QApp
+        _QApp.setOverrideCursor(Qt.BlankCursor)
         if self._toolbar:
             self._toolbar.hide()
         self._load_screen(self._current_idx)
