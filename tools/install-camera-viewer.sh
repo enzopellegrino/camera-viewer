@@ -308,22 +308,24 @@ menuentry "Camera Viewer" {
 EOFCFG
 echo "  ✓ grub.cfg scritto (kernel: $(basename "$KERNEL_FILE"))"
 
-# Build a standalone GRUB EFI binary on the live host — no chroot, no
-# grub-probe device detection. grub-mkstandalone embeds the search-by-label
-# command directly into the binary so GRUB always finds the root partition
-# (cv-system) regardless of NVRAM state or what grub-probe would have inferred.
-# This replaces grub-install (which runs grub-probe inside the chroot and can
-# silently produce an unbootable binary when device paths are ambiguous).
-cat > /tmp/grub-embedded.cfg << 'EOFGRUB'
+# Build a standalone GRUB EFI binary with the full boot config embedded.
+# configfile is NOT used: it would require GRUB to load modules from
+# ($root)/boot/grub/x86_64-efi/ which doesn't exist on the installed disk
+# (grub-install was never run). Without those modules, configfile enters
+# normal mode, can't load them, and falls to the grub> shell.
+# Instead, we bake the linux/initrd/boot commands directly into the binary
+# using values we already know at install time. No module loading from disk.
+cat > /tmp/grub-embedded.cfg << EOFGRUB
 search --no-floppy --label --set=root cv-system
-set prefix=($root)/boot/grub
-configfile ($root)/boot/grub/grub.cfg
+linux $KERNEL_FILE root=UUID=$SYS_UUID ro quiet loglevel=3 nosplash
+initrd $INITRD_FILE
+boot
 EOFGRUB
 
 grub-mkstandalone \
     --format=x86_64-efi \
     --output=/tmp/grubx64.efi \
-    --modules="part_gpt fat ext2 normal linux search search_label echo" \
+    --modules="part_gpt fat ext2 linux search search_label" \
     "boot/grub/grub.cfg=/tmp/grub-embedded.cfg"
 echo "  ✓ GRUB EFI standalone generato"
 
