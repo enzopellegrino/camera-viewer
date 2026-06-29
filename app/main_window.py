@@ -657,28 +657,30 @@ class MainWindow(QMainWindow):
         # ── Touch: pinch (2 dita) e swipe (1 dito) ───────────────────────────
         if et == QEvent.TouchBegin:
             pts = event.points()
-            if len(pts) == 2 and self._single_cam_mode:
-                # Inizio pinch: registra distanza iniziale e zoom corrente
-                self._pinch_start_dist = self._touch_dist(pts[0], pts[1])
-                cam = self._grid._single if self._grid else None
-                self._pinch_start_zoom = cam._video_zoom if cam else 0.0
-                self._touch_start_x = None  # disabilita swipe durante pinch
-            elif len(pts) == 1:
+            # TouchBegin arriva sempre con 1 sola dita — registra solo lo swipe start.
+            # Il secondo dito arriva nel primo TouchUpdate con len(pts)==2.
+            self._pinch_start_dist = None
+            if pts:
                 self._touch_start_x = pts[0].position().x()
-                self._pinch_start_dist = None
             return False
 
         if et == QEvent.TouchUpdate:
             pts = event.points()
             cam = self._grid._single if (self._grid and self._single_cam_mode) else None
-            if len(pts) == 2 and self._pinch_start_dist and cam:
-                # Pinch in corso: aggiorna video-zoom di mpv
-                dist = self._touch_dist(pts[0], pts[1])
-                if self._pinch_start_dist > 0:
-                    import math
-                    scale = dist / self._pinch_start_dist
-                    zoom = self._pinch_start_zoom + math.log2(max(scale, 0.01))
-                    cam.set_video_zoom(zoom)
+            if len(pts) >= 2 and cam:
+                if self._pinch_start_dist is None:
+                    # Secondo dito appena aggiunto: inizializza pinch
+                    self._pinch_start_dist = self._touch_dist(pts[0], pts[1])
+                    self._pinch_start_zoom = cam._video_zoom
+                    self._touch_start_x = None   # annulla swipe
+                else:
+                    # Pinch in corso: aggiorna video-zoom di mpv
+                    dist = self._touch_dist(pts[0], pts[1])
+                    if self._pinch_start_dist > 0:
+                        import math
+                        scale = dist / self._pinch_start_dist
+                        zoom = self._pinch_start_zoom + math.log2(max(scale, 0.01))
+                        cam.set_video_zoom(zoom)
             elif len(pts) == 1 and self._touch_start_x is not None:
                 if len(self.config.screens) > 1:
                     self._switcher.expand_temporarily()
