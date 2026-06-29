@@ -496,6 +496,8 @@ class MainWindow(QMainWindow):
         n = len(self.config.screens)
         if n <= 1:
             return
+        if self._single_cam_mode:
+            self._exit_single_cam()
         self._load_screen((self._current_idx - 1) % n)
         self._switcher.expand_temporarily()
 
@@ -503,6 +505,8 @@ class MainWindow(QMainWindow):
         n = len(self.config.screens)
         if n <= 1:
             return
+        if self._single_cam_mode:
+            self._exit_single_cam()
         self._load_screen((self._current_idx + 1) % n)
         self._switcher.expand_temporarily()
 
