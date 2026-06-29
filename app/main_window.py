@@ -671,36 +671,50 @@ class MainWindow(QMainWindow):
         if et == QEvent.TouchUpdate:
             pts = event.points()
             cam = self._grid._single if (self._grid and self._single_cam_mode) else None
-            if len(pts) >= 2 and cam:
+            if len(pts) >= 2:
+                mx = (pts[0].position().x() + pts[1].position().x()) / 2
+                my = (pts[0].position().y() + pts[1].position().y()) / 2
+
                 if self._pinch_start_dist is None:
                     # Secondo dito appena aggiunto: inizializza pinch
                     self._pinch_start_dist = self._touch_dist(pts[0], pts[1])
-                    self._pinch_start_zoom = cam._video_zoom
-                    self._pinch_start_pan_x = cam._video_pan_x
-                    self._pinch_start_pan_y = cam._video_pan_y
-                    # Punto medio delle dita, normalizzato a [-0.5, 0.5]
-                    mx = (pts[0].position().x() + pts[1].position().x()) / 2
-                    my = (pts[0].position().y() + pts[1].position().y()) / 2
-                    self._pinch_center_x = mx / max(cam.width(), 1) - 0.5
-                    self._pinch_center_y = my / max(cam.height(), 1) - 0.5
+                    self._pinch_start_zoom = cam._video_zoom if cam else 0.0
+                    self._pinch_start_pan_x = cam._video_pan_x if cam else 0.0
+                    self._pinch_start_pan_y = cam._video_pan_y if cam else 0.0
+                    self._pinch_center_x = mx
+                    self._pinch_center_y = my
                     self._touch_start_x = None   # annulla swipe
                 else:
-                    # Pinch in corso: zoom + pan centrato sul punto di pizzico
                     dist = self._touch_dist(pts[0], pts[1])
                     if self._pinch_start_dist > 0:
                         import math
                         scale = dist / self._pinch_start_dist
-                        new_zoom = self._pinch_start_zoom + math.log2(max(scale, 0.01))
-                        new_zoom = max(-1.0, min(4.0, new_zoom))
-                        # Quanto è cambiata la scala rispetto all'inizio del pinch
-                        s = 2 ** (new_zoom - self._pinch_start_zoom)
-                        cx = self._pinch_center_x
-                        cy = self._pinch_center_y
-                        # Pan per tenere fisso il punto di pizzico:
-                        # new_pan = cx - (cx - start_pan) * s
-                        pan_x = cx - (cx - self._pinch_start_pan_x) * s
-                        pan_y = cy - (cy - self._pinch_start_pan_y) * s
-                        cam.set_video_zoom(new_zoom, pan_x, pan_y)
+
+                        if not self._single_cam_mode:
+                            # Griglia: entra in single-cam quando pinch supera soglia
+                            if scale > 1.3:
+                                target = self._cam_widget_at(mx, my)
+                                if target:
+                                    self._enter_single_cam(target)
+                                    cam = target
+                                    # Inizializza zoom/pan dal punto corrente
+                                    self._pinch_start_zoom = 0.0
+                                    self._pinch_start_pan_x = 0.0
+                                    self._pinch_start_pan_y = 0.0
+                                    self._pinch_start_dist = dist
+                        else:
+                            # Single-cam: zoom + pan centrato sul punto di pizzico
+                            if cam:
+                                new_zoom = self._pinch_start_zoom + math.log2(max(scale, 0.01))
+                                new_zoom = max(-1.0, min(4.0, new_zoom))
+                                s = 2 ** (new_zoom - self._pinch_start_zoom)
+                                w = max(cam.width(), 1)
+                                h = max(cam.height(), 1)
+                                cx = self._pinch_center_x / w - 0.5
+                                cy = self._pinch_center_y / h - 0.5
+                                pan_x = cx - (cx - self._pinch_start_pan_x) * s
+                                pan_y = cy - (cy - self._pinch_start_pan_y) * s
+                                cam.set_video_zoom(new_zoom, pan_x, pan_y)
             elif len(pts) == 1 and self._touch_start_x is not None:
                 if len(self.config.screens) > 1:
                     self._switcher.expand_temporarily()
@@ -801,6 +815,31 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     # ----------------------------------------------------------- helpers
+
+    def _cam_widget_at(self, x: float, y: float):
+        """Ritorna il CameraWidget sotto il punto (x,y) in coordinate del widget root."""
+        from PySide6.QtWidgets import QApplication
+        from .camera_widget import CameraWidget
+        root = self.centralWidget()
+        if root is None:
+            return None
+        global_pos = root.mapToGlobal(root.rect().topLeft())
+        # Converti in coordinate globali
+        from PySide6.QtCore import QPoint
+        gx = int(global_pos.x() + x)
+        gy = int(global_pos.y() + y)
+        widget = QApplication.widgetAt(gx, gy)
+        # Risali finché non troviamo un CameraWidget
+        while widget is not None:
+            if isinstance(widget, CameraWidget):
+                return widget
+            widget = widget.parent()
+        # Fallback: cerca nella lista dei widget del grid
+        if self._grid:
+            for w in self._grid._widgets:
+                if w.geometry().contains(int(x), int(y)):
+                    return w
+        return None
 
     @staticmethod
     def _touch_dist(p1, p2) -> float:
