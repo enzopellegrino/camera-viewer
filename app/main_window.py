@@ -501,25 +501,25 @@ class MainWindow(QMainWindow):
         self._switcher.set_active(self._current_idx)
 
     def _prev_screen(self):
-        # In single-cam mode: cicla sulla telecamera precedente nella stessa vista
+        # In single-cam mode: telecamera precedente nella stessa vista
         if self._single_cam_mode and self._grid:
             self._grid.prev_single_cam()
             return
         n = len(self.config.screens)
-        if n <= 1:
-            return
-        self._load_screen((self._current_idx - 1) % n)
+        if n <= 1 or self._current_idx <= 0:
+            return   # già alla prima vista, non ciclare
+        self._load_screen(self._current_idx - 1)
         self._switcher.expand_temporarily()
 
     def _next_screen(self):
-        # In single-cam mode: cicla sulla telecamera successiva nella stessa vista
+        # In single-cam mode: telecamera successiva nella stessa vista
         if self._single_cam_mode and self._grid:
             self._grid.next_single_cam()
             return
         n = len(self.config.screens)
-        if n <= 1:
-            return
-        self._load_screen((self._current_idx + 1) % n)
+        if n <= 1 or self._current_idx >= n - 1:
+            return   # già all'ultima vista, non ciclare
+        self._load_screen(self._current_idx + 1)
         self._switcher.expand_temporarily()
 
     def _refresh_switcher(self):
@@ -727,7 +727,7 @@ class MainWindow(QMainWindow):
                 dx = pts[0].position().x() - self._touch_start_x
                 dy = pts[0].position().y() - (self._touch_start_y or 0)
                 # Marca come swipe solo se il dito si muove orizzontalmente in modo intenzionale
-                if abs(dx) > 40 and abs(dx) > abs(dy) * 2:
+                if abs(dx) > 60 and abs(dx) > abs(dy) * 2.5:
                     self._touch_is_swipe = True
                 if self._touch_is_swipe and len(self.config.screens) > 1:
                     self._switcher.expand_temporarily()
