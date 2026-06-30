@@ -336,6 +336,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(root)
         self._touch_start_x: float | None = None
         self._touch_start_y: float | None = None
+        self._touch_is_swipe: bool = False   # True solo se il dito si è mosso intenzionalmente
         self._pinch_start_dist: float | None = None
         self._pinch_start_zoom: float = 0.0
         self._pinch_start_pan_x: float = 0.0
@@ -669,6 +670,7 @@ class MainWindow(QMainWindow):
             # TouchBegin arriva sempre con 1 sola dita — registra solo lo swipe start.
             # Il secondo dito arriva nel primo TouchUpdate con len(pts)==2.
             self._pinch_start_dist = None
+            self._touch_is_swipe = False
             if pts:
                 self._touch_start_x = pts[0].position().x()
                 self._touch_start_y = pts[0].position().y()
@@ -722,30 +724,35 @@ class MainWindow(QMainWindow):
                                 pan_y = cy - (cy - self._pinch_start_pan_y) * s
                                 cam.set_video_zoom(new_zoom, pan_x, pan_y)
             elif len(pts) == 1 and self._touch_start_x is not None:
-                if len(self.config.screens) > 1:
+                dx = pts[0].position().x() - self._touch_start_x
+                dy = pts[0].position().y() - (self._touch_start_y or 0)
+                # Marca come swipe solo se il dito si muove orizzontalmente in modo intenzionale
+                if abs(dx) > 40 and abs(dx) > abs(dy) * 2:
+                    self._touch_is_swipe = True
+                if self._touch_is_swipe and len(self.config.screens) > 1:
                     self._switcher.expand_temporarily()
             return False
 
         if et == QEvent.TouchEnd:
             self._pinch_start_dist = None
-            if self._touch_start_x is not None and len(self.config.screens) > 1:
+            # Swipe valido solo se il flag è stato impostato durante TouchUpdate
+            # (movimento orizzontale intenzionale rilevato in tempo reale).
+            # Un tap non imposta mai _touch_is_swipe → nessun cambio vista accidentale.
+            if self._touch_is_swipe and len(self.config.screens) > 1:
                 pts = event.points()
-                if pts:
+                if pts and self._touch_start_x is not None:
                     delta_x = pts[0].position().x() - self._touch_start_x
-                    delta_y = pts[0].position().y() - (self._touch_start_y or 0)
-                    # Swipe valido solo se:
-                    # 1. spostamento orizzontale > 120px
-                    # 2. movimento prevalentemente orizzontale (dx > 2× dy)
-                    if abs(delta_x) > 120 and abs(delta_x) > abs(delta_y) * 2:
-                        if delta_x < 0:
-                            self._next_screen()
-                        else:
-                            self._prev_screen()
-                        self._touch_start_x = None
-                        self._touch_start_y = None
-                        return True
+                    if delta_x < 0:
+                        self._next_screen()
+                    else:
+                        self._prev_screen()
+                    self._touch_start_x = None
+                    self._touch_start_y = None
+                    self._touch_is_swipe = False
+                    return True
             self._touch_start_x = None
             self._touch_start_y = None
+            self._touch_is_swipe = False
             return False
 
         return False
