@@ -598,6 +598,10 @@ class MainWindow(QMainWindow):
     def _enter_single_cam(self, widget):
         self._single_cam_mode = True
         self._grid.enter_single_cam(widget)
+        # Annulla il rilevamento swipe: il tap che ha aperto la cam
+        # non deve essere interpretato come swipe al TouchEnd.
+        self._touch_start_x = None
+        self._pinch_start_dist = None
         if self._toolbar:
             self._toolbar.hide()
 
