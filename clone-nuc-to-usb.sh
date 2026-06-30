@@ -160,14 +160,70 @@ echo "GRUB e fstab aggiornati"
 GRUBSCRIPT
 ok "fstab e GRUB aggiornati"
 
+# ── Copia installer sul sistema USB ──────────────────────────────────────────
+TOTAL=7
+step 6 "Copia installer sul sistema USB..."
+
+INSTALLER_SCRIPT="$(dirname "$0")/setup/install-to-disk.sh"
+[ -f "$INSTALLER_SCRIPT" ] || { warn "install-to-disk.sh non trovato, skip"; }
+
+if [ -f "$INSTALLER_SCRIPT" ]; then
+    # Copia lo script sul NUC e poi sulla USB montata
+    sshpass -p "$NUC_PASS" scp "${SCP_O[@]}" \
+        "$INSTALLER_SCRIPT" "$NUC_USER@$NUC_IP:/tmp/install-to-disk.sh"
+
+    sshpass -p "$NUC_PASS" ssh "${SSH_O[@]}" "$NUC_USER@$NUC_IP" "sudo bash -s '$USB_DEV'" << 'INSTALLERSCRIPT'
+USB="$1"
+MNT=/mnt/cv-clone
+sudo mkdir -p $MNT
+sudo mount "${USB}2" $MNT
+
+# Copia lo script installer
+sudo mkdir -p $MNT/opt/cv-install
+sudo cp /tmp/install-to-disk.sh $MNT/opt/cv-install/install-to-disk.sh
+sudo chmod +x $MNT/opt/cv-install/install-to-disk.sh
+
+# Crea il servizio systemd che avvia l'installer al primo boot dalla USB
+sudo tee $MNT/etc/systemd/system/cv-installer.service > /dev/null << 'SVCEOF'
+[Unit]
+Description=Camera Viewer — Installa sul disco interno
+After=multi-user.target
+ConditionPathExists=/opt/cv-install/install-to-disk.sh
+
+[Service]
+Type=oneshot
+Environment=CV_AUTO_INSTALL=1
+ExecStart=/opt/cv-install/install-to-disk.sh
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+SVCEOF
+
+# Abilita il servizio
+sudo ln -sf /etc/systemd/system/cv-installer.service \
+    $MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service
+
+sudo umount $MNT
+echo "Installer copiato e servizio abilitato"
+INSTALLERSCRIPT
+    ok "Installer copiato sulla USB"
+fi
+
 # ── Fine ─────────────────────────────────────────────────────────────────────
-step 6 "Completato!"
+step 7 "Completato!"
 echo ""
 echo -e "${G}${B}╔══════════════════════════════════════════════════╗${E}"
-echo -e "${G}${B}║  ✅ USB clonata dal NUC!                         ║${E}"
+echo -e "${G}${B}║  ✅ USB installer pronta!                        ║${E}"
 echo -e "${G}${B}╠══════════════════════════════════════════════════╣${E}"
-echo -e "${G}${B}║  Il sistema USB è identico al NUC funzionante.   ║${E}"
-echo -e "${G}${B}║  Config pulita — pronta per nuovo cliente.       ║${E}"
+echo -e "${G}${B}║  1. Stacca USB dal NUC                           ║${E}"
+echo -e "${G}${B}║  2. Inseriscila nel nuovo mini PC                ║${E}"
+echo -e "${G}${B}║  3. Accendi → F10/F12 → seleziona USB            ║${E}"
+echo -e "${G}${B}║  4. L'installer parte in automatico              ║${E}"
+echo -e "${G}${B}║  5. Alla fine: stacca USB e riavvia              ║${E}"
 echo -e "${G}${B}║                                                  ║${E}"
-echo -e "${G}${B}║  Stacca USB dal NUC → inserisci nel PC → F10    ║${E}"
+echo -e "${G}${B}║  Il sistema si installa sul disco interno        ║${E}"
+echo -e "${G}${B}║  con config pulita — pronta per nuovo cliente.   ║${E}"
 echo -e "${G}${B}╚══════════════════════════════════════════════════╝${E}"
