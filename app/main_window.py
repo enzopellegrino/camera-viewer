@@ -335,6 +335,7 @@ class MainWindow(QMainWindow):
         self.setMouseTracking(True)
         self.setCentralWidget(root)
         self._touch_start_x: float | None = None
+        self._touch_start_y: float | None = None
         self._pinch_start_dist: float | None = None
         self._pinch_start_zoom: float = 0.0
         self._pinch_start_pan_x: float = 0.0
@@ -670,6 +671,7 @@ class MainWindow(QMainWindow):
             self._pinch_start_dist = None
             if pts:
                 self._touch_start_x = pts[0].position().x()
+                self._touch_start_y = pts[0].position().y()
             return False
 
         if et == QEvent.TouchUpdate:
@@ -730,14 +732,20 @@ class MainWindow(QMainWindow):
                 pts = event.points()
                 if pts:
                     delta_x = pts[0].position().x() - self._touch_start_x
-                    if abs(delta_x) > 80:          # soglia minima swipe (px)
+                    delta_y = pts[0].position().y() - (self._touch_start_y or 0)
+                    # Swipe valido solo se:
+                    # 1. spostamento orizzontale > 120px
+                    # 2. movimento prevalentemente orizzontale (dx > 2× dy)
+                    if abs(delta_x) > 120 and abs(delta_x) > abs(delta_y) * 2:
                         if delta_x < 0:
-                            self._next_screen()    # swipe ← → vista successiva
+                            self._next_screen()
                         else:
-                            self._prev_screen()    # swipe → → vista precedente
+                            self._prev_screen()
                         self._touch_start_x = None
+                        self._touch_start_y = None
                         return True
             self._touch_start_x = None
+            self._touch_start_y = None
             return False
 
         return False
