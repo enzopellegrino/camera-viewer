@@ -26,7 +26,7 @@ from PySide6.QtGui import QCursor, QPixmap
 _DEFAULT_FPS = 25  # kept for main.py settings compatibility
 
 
-def _mpv_command(url: str, wid: int, passphrase: str = "", hw_decode: bool = False) -> list[str]:
+def _mpv_command(url: str, wid: int, ipc_path: str, passphrase: str = "", hw_decode: bool = False) -> list[str]:
     """Build the mpv command line for an embedded camera stream.
 
     Network caching (cache-secs) absorbs jitter for smooth playback; keep it
@@ -35,6 +35,7 @@ def _mpv_command(url: str, wid: int, passphrase: str = "", hw_decode: bool = Fal
     cmd = [
         "mpv",
         f"--wid={wid}",                      # embed into the Qt widget's X11 window
+        f"--input-ipc-server={ipc_path}",    # IPC socket per controllo video-zoom
         "--no-config",                       # ignore user mpv config
         "--no-audio",
         "--no-osc",                          # no on-screen controls
@@ -100,6 +101,11 @@ class CameraWidget(QWidget):
         self._proc: subprocess.Popen | None = None
         self._started = False
         self._hw_decode = False  # SW decode in grid; HW when focused/fullscreen
+        self._video_zoom: float = 0.0   # mpv video-zoom (0=1x, 1=2x, log2 scale)
+        self._video_pan_x: float = 0.0  # mpv video-pan-x (frazione video scalato)
+        self._video_pan_y: float = 0.0  # mpv video-pan-y
+        cam_id = camera_config.get("id", id(self))
+        self._ipc_path = f"/tmp/mpv-cam-{cam_id}.sock"
 
         # Native X11 window so winId() is a real XID for mpv --wid.
         self.setAttribute(Qt.WA_NativeWindow)
@@ -202,9 +208,12 @@ class CameraWidget(QWidget):
         self._show_placeholder()
 
         self._kill_proc()
+        self._video_zoom = 0.0   # reset zoom/pan ad ogni riavvio stream
+        self._video_pan_x = 0.0
+        self._video_pan_y = 0.0
 
         passphrase = self.camera_config.get("passphrase", "").strip()
-        cmd = _mpv_command(url, int(self.winId()), passphrase, self._hw_decode)
+        cmd = _mpv_command(url, int(self.winId()), self._ipc_path, passphrase, self._hw_decode)
 
         # New session so we can kill the whole mpv process group cleanly.
         self._proc = subprocess.Popen(
@@ -254,6 +263,38 @@ class CameraWidget(QWidget):
             self._proc = None  # release reference; OS handles cleanup
 
     # ── Public API (used by main.py) ──────────────────────────────────────────
+
+    def set_video_zoom(self, zoom: float, pan_x: float = None, pan_y: float = None):
+        """Imposta zoom e (opzionale) pan video mpv. zoom in scala log2 (0=1x, 1=2x)."""
+        self._video_zoom = max(-1.0, min(4.0, zoom))
+        self._mpv_set_property("video-zoom", self._video_zoom)
+        if pan_x is not None:
+            self._video_pan_x = pan_x
+            self._mpv_set_property("video-pan-x", self._video_pan_x)
+        if pan_y is not None:
+            self._video_pan_y = pan_y
+            self._mpv_set_property("video-pan-y", self._video_pan_y)
+
+    def reset_video_zoom(self):
+        """Riporta zoom e pan a 1x/centro."""
+        self._video_zoom = 0.0
+        self._video_pan_x = 0.0
+        self._video_pan_y = 0.0
+        self._mpv_set_property("video-zoom", 0.0)
+        self._mpv_set_property("video-pan-x", 0.0)
+        self._mpv_set_property("video-pan-y", 0.0)
+
+    def _mpv_set_property(self, prop: str, value):
+        """Invia un comando IPC a mpv via Unix socket (non bloccante)."""
+        import socket, json
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(0.1)
+            s.connect(self._ipc_path)
+            s.sendall((json.dumps({"command": ["set_property", prop, value]}) + "\n").encode())
+            s.close()
+        except Exception:
+            pass  # mpv non ancora pronto o socket non disponibile
 
     def set_quality(self, high: bool):
         """Switch between grid quality (SW decode) and focus quality (HW decode).
