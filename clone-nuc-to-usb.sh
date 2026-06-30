@@ -109,9 +109,7 @@ sudo rsync -aAX --delete --info=progress2 \
     --exclude='/data/*'    \
     --exclude='/swap.img'  \
     --exclude='/boot/efi/*' \
-    --exclude='/home/pi/.config/camera-viewer/*' \
     --exclude='/home/pi/setup-nuc.*' \
-    --exclude='/etc/NetworkManager/system-connections/*' \
     / $MNT/ 2>/dev/null
 echo "Rsync completato"
 CLONESCRIPT

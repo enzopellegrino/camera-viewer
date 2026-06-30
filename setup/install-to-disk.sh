@@ -145,20 +145,6 @@ UUID=$EFI_UUID  /boot/efi  vfat  defaults          0 2
 LABEL=cv-data   /data      ext4  defaults,noatime  0 2
 FSTAB
 
-# Config iniziale pulita (senza telecamere/VPN dell'installazione sorgente)
-mkdir -p $MNT/data/camera-viewer
-tee $MNT/data/camera-viewer/config.json > /dev/null << 'CFGJSON'
-{
-  "cameras": [],
-  "screens": [{"id": "default", "name": "Default", "layout": "auto", "cameras": []}],
-  "active_screen_id": "default",
-  "settings": {"kiosk_mode": true, "reconnect_delay_ms": 5000, "render_fps": 25},
-  "site_name": "Camera Viewer",
-  "users": []
-}
-CFGJSON
-chown -R 1000:1000 $MNT/data/camera-viewer
-
 # Rimuovi il servizio installer dal sistema installato (non deve girare di nuovo)
 rm -f "$MNT/etc/systemd/system/cv-installer.service"
 rm -f "$MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service"
