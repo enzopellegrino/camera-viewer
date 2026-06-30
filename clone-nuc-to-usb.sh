@@ -41,6 +41,20 @@ fi
 SSH_O=(-o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no)
 SCP_O=(-o StrictHostKeyChecking=no -o PasswordAuthentication=yes -o PubkeyAuthentication=no)
 
+# ── Scelta configurazione ─────────────────────────────────────────────────────
+echo -e "  ${B}Cosa vuoi copiare sulla USB?${E}"
+echo ""
+echo "  [1] Copia tutto — stesso sistema, stesse telecamere, stessa VPN"
+echo "  [2] Sistema pulito — pronto per configurare un nuovo cliente"
+echo ""
+read -rp "  Scelta [1/2]: " CONFIG_CHOICE
+echo ""
+case "$CONFIG_CHOICE" in
+    2) COPY_CONFIG=0; ok "Modalità: sistema pulito" ;;
+    *) COPY_CONFIG=1; ok "Modalità: copia configurazione completa" ;;
+esac
+echo ""
+
 step 1 "Connessione al NUC ($NUC_IP)..."
 HOSTNAME=$(sshpass -p "$NUC_PASS" ssh "${SSH_O[@]}" "$NUC_USER@$NUC_IP" "hostname" 2>/dev/null) \
     || err "NUC non raggiungibile"
@@ -86,10 +100,18 @@ ok "USB partizionata"
 
 # ── Clona sistema NUC → USB ──────────────────────────────────────────────────
 step 4 "Clonazione sistema NUC → USB (~10-15 min)..."
-echo "  (rsync di tutto il filesystem, esclusi dati cliente e /home)"
 
-sshpass -p "$NUC_PASS" ssh "${SSH_O[@]}" "$NUC_USER@$NUC_IP" "sudo bash -s '$USB_DEV'" << 'CLONESCRIPT'
+EXTRA_EXCLUDES=""
+if [ "$COPY_CONFIG" = "0" ]; then
+    echo "  (sistema pulito — config esclusa)"
+    EXTRA_EXCLUDES="--exclude='/home/pi/.config/camera-viewer/*' --exclude='/etc/NetworkManager/system-connections/*'"
+else
+    echo "  (configurazione completa inclusa)"
+fi
+
+sshpass -p "$NUC_PASS" ssh "${SSH_O[@]}" "$NUC_USER@$NUC_IP" "sudo bash -s '$USB_DEV' '$COPY_CONFIG'" << 'CLONESCRIPT'
 USB="$1"
+COPY_CONFIG="$2"
 MNT=/mnt/cv-clone
 
 sudo mkdir -p $MNT
@@ -97,28 +119,37 @@ sudo mount "${USB}2" $MNT
 sudo mkdir -p $MNT/boot/efi
 sudo mount "${USB}1" $MNT/boot/efi
 
+EXCLUDES=(
+    --exclude='/proc/*'
+    --exclude='/sys/*'
+    --exclude='/dev/*'
+    --exclude='/run/*'
+    --exclude='/tmp/*'
+    --exclude='/mnt/*'
+    --exclude='/media/*'
+    --exclude='/data/*'
+    --exclude='/swap.img'
+    --exclude='/boot/efi/*'
+    --exclude='/home/pi/setup-nuc.*'
+)
+if [ "$COPY_CONFIG" = "0" ]; then
+    EXCLUDES+=(
+        --exclude='/home/pi/.config/camera-viewer/*'
+        --exclude='/etc/NetworkManager/system-connections/*'
+    )
+fi
+
 echo "Rsync sistema..."
-sudo rsync -aAX --delete --info=progress2 \
-    --exclude='/proc/*'    \
-    --exclude='/sys/*'     \
-    --exclude='/dev/*'     \
-    --exclude='/run/*'     \
-    --exclude='/tmp/*'     \
-    --exclude='/mnt/*'     \
-    --exclude='/media/*'   \
-    --exclude='/data/*'    \
-    --exclude='/swap.img'  \
-    --exclude='/boot/efi/*' \
-    --exclude='/home/pi/setup-nuc.*' \
-    / $MNT/ 2>/dev/null
+sudo rsync -aAX --delete --info=progress2 "${EXCLUDES[@]}" / $MNT/ 2>/dev/null
 echo "Rsync completato"
 CLONESCRIPT
 ok "Sistema clonato"
 
 # ── Aggiorna fstab e GRUB ────────────────────────────────────────────────────
 step 5 "Aggiornamento fstab e GRUB per USB..."
-sshpass -p "$NUC_PASS" ssh "${SSH_O[@]}" "$NUC_USER@$NUC_IP" "sudo bash -s '$USB_DEV'" << 'GRUBSCRIPT'
+sshpass -p "$NUC_PASS" ssh "${SSH_O[@]}" "$NUC_USER@$NUC_IP" "sudo bash -s '$USB_DEV' '$COPY_CONFIG'" << 'GRUBSCRIPT'
 USB="$1"
+COPY_CONFIG="$2"
 MNT=/mnt/cv-clone
 
 # UUID delle partizioni USB
@@ -133,11 +164,13 @@ UUID=$EFI_UUID  /boot/efi  vfat  defaults          0 2
 LABEL=cv-data   /data      ext4  defaults,noatime  0 2
 FSTAB
 
-# Config iniziale pulita (senza telecamere/VPN del NUC)
-sudo mkdir -p $MNT/data/camera-viewer
-sudo tee $MNT/data/camera-viewer/config.json > /dev/null << 'CFGJSON'
-{"cameras":[],"screens":[],"settings":{"kiosk_mode":true,"reconnect_delay_ms":5000,"render_fps":25},"site_name":"Camera Viewer","users":[]}
+# Se sistema pulito: crea config vuota
+if [ "$COPY_CONFIG" = "0" ]; then
+    sudo mkdir -p $MNT/data/camera-viewer
+    sudo tee $MNT/data/camera-viewer/config.json > /dev/null << 'CFGJSON'
+{"cameras":[],"screens":[{"id":"default","name":"Default","layout":"auto","cameras":[]}],"active_screen_id":"default","settings":{"kiosk_mode":true,"reconnect_delay_ms":5000,"render_fps":25},"site_name":"Camera Viewer","users":[]}
 CFGJSON
+fi
 
 # GRUB dal chroot (il modo corretto Ubuntu)
 for d in dev dev/pts proc sys run; do sudo mount --bind /$d $MNT/$d 2>/dev/null || true; done
@@ -180,6 +213,11 @@ sudo mount "${USB}2" $MNT
 sudo mkdir -p $MNT/opt/cv-install
 sudo cp /tmp/install-to-disk.sh $MNT/opt/cv-install/install-to-disk.sh
 sudo chmod +x $MNT/opt/cv-install/install-to-disk.sh
+
+# Flag per config pulita (letto da install-to-disk.sh)
+if [ "$COPY_CONFIG" = "0" ]; then
+    sudo touch $MNT/opt/cv-install/.clean-config
+fi
 
 # Crea il servizio systemd che avvia l'installer al primo boot dalla USB
 sudo tee $MNT/etc/systemd/system/cv-installer.service > /dev/null << 'SVCEOF'

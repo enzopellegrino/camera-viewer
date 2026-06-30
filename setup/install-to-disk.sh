@@ -145,6 +145,15 @@ UUID=$EFI_UUID  /boot/efi  vfat  defaults          0 2
 LABEL=cv-data   /data      ext4  defaults,noatime  0 2
 FSTAB
 
+# Se sistema pulito (flag creato da clone-nuc-to-usb.sh): ripristina config vuota
+if [ -f "$MNT/opt/cv-install/.clean-config" ]; then
+    mkdir -p $MNT/home/pi/.config/camera-viewer
+    tee $MNT/home/pi/.config/camera-viewer/config.json > /dev/null << 'CFGJSON'
+{"cameras":[],"screens":[{"id":"default","name":"Default","layout":"auto","cameras":[]}],"active_screen_id":"default","settings":{"kiosk_mode":true,"reconnect_delay_ms":5000,"render_fps":25},"site_name":"Camera Viewer","users":[]}
+CFGJSON
+    chown -R 1000:1000 $MNT/home/pi/.config/camera-viewer
+fi
+
 # Rimuovi il servizio installer dal sistema installato (non deve girare di nuovo)
 rm -f "$MNT/etc/systemd/system/cv-installer.service"
 rm -f "$MNT/etc/systemd/system/multi-user.target.wants/cv-installer.service"
