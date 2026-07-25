@@ -6,7 +6,7 @@
 # Uso: bash fix-usb-on-nuc.sh [IP_NUC]
 set -euo pipefail
 
-NUC_IP="${1:-192.168.10.239}"
+NUC_IP="${1:-10.10.70.55}"
 NUC_USER="pi"
 NUC_PASS="N1computer@2019"
 VERSION="2.0"
