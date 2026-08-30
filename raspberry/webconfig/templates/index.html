@@ -387,6 +387,34 @@
       <!-- ══ SISTEMA ══ -->
       <p class="text-muted" style="font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;margin:20px 0 10px">⚙️ Sistema</p>
 
+      <!-- Aggiornamenti OTA -->
+      <div class="card admin-only">
+        <h3>🔄 Aggiornamenti</h3>
+        <div id="update-status-box" style="margin-bottom:14px">
+          <p class="text-muted" style="font-size:.85rem">Versione corrente: <strong id="update-current-ver">…</strong></p>
+        </div>
+        <div id="update-available-box" class="hidden" style="background:var(--bg);border:1px solid var(--accent);border-radius:8px;padding:14px;margin-bottom:14px">
+          <div style="font-weight:700;margin-bottom:4px">📦 Nuova versione disponibile: <span id="update-latest-ver"></span></div>
+          <div id="update-release-notes" class="text-muted" style="font-size:.83rem;white-space:pre-wrap;max-height:120px;overflow-y:auto"></div>
+        </div>
+        <div id="update-uptodate-box" class="hidden" style="color:var(--success,#4caf50);font-size:.85rem;margin-bottom:14px">
+          ✅ Il sistema è aggiornato
+        </div>
+        <div id="update-error-box" style="color:var(--danger);font-size:.83rem;margin:6px 0;display:none"></div>
+        <div class="form-actions" style="flex-wrap:wrap;gap:8px">
+          <button class="btn" id="update-check-btn">🔍 Controlla aggiornamenti</button>
+          <button class="btn btn-primary hidden" id="update-apply-btn">⬇ Installa aggiornamento</button>
+        </div>
+        <details style="margin-top:14px">
+          <summary class="text-muted" style="cursor:pointer;font-size:.82rem">🔑 Token GitHub (repo privato)</summary>
+          <div class="field" style="margin-top:8px">
+            <label>GitHub Personal Access Token</label>
+            <input id="update-token-input" type="password" placeholder="ghp_…"/>
+          </div>
+          <button class="btn btn-sm" id="update-token-save">Salva token</button>
+        </details>
+      </div>
+
       <div class="card">
         <h3>Controllo viewer</h3>
         <p class="text-muted mb-12">Riavvia l'app sulla TV senza riavviare il dispositivo.</p>
@@ -403,7 +431,7 @@
       <div class="about-card">
         <div class="about-icon">🎥</div>
         <div class="about-info">
-          <div class="about-title">Camera Viewer <span class="about-version">v2.0</span></div>
+          <div class="about-title">Camera Viewer <span class="about-version" id="about-version">v…</span></div>
           <div class="about-desc">Sistema di monitoraggio video — telecamere e altre sorgenti</div>
           <div class="about-author">Creato da <strong>Enzo Pellegrino</strong></div>
           <div class="about-year">© 2025–2026</div>

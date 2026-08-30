@@ -26,6 +26,7 @@ from . import config_store as store
 from . import network
 from . import vpn
 from . import vpn_openvpn
+from . import updater
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
@@ -943,6 +944,47 @@ def api_license_set():
         pass
 
     return jsonify({"ok": True, "payload": payload})
+
+
+# ── API: OTA Update ──────────────────────────────────────────────────────────
+
+@app.route("/api/update/check", methods=["GET"])
+@login_required(admin=True)
+def api_update_check():
+    token = store.get_settings().get("github_token", "")
+    if not token:
+        return jsonify({"ok": False, "error": "Token GitHub non configurato"}), 400
+    info = updater.check_update(token)
+    if "error" in info:
+        return jsonify({"ok": False, "error": info["error"]}), 502
+    return jsonify({"ok": True, **info})
+
+
+@app.route("/api/update/apply", methods=["POST"])
+@login_required(admin=True)
+def api_update_apply():
+    token = store.get_settings().get("github_token", "")
+    if not token:
+        return jsonify({"ok": False, "error": "Token GitHub non configurato"}), 400
+    ok, msg = updater.apply_update(token)
+    return jsonify({"ok": ok, "message": msg}), (200 if ok else 500)
+
+
+@app.route("/api/update/token", methods=["POST"])
+@login_required(admin=True)
+def api_update_token_set():
+    data = request.get_json(force=True, silent=True) or {}
+    token = (data.get("token") or "").strip()
+    if not token:
+        return jsonify({"ok": False, "message": "Token vuoto"}), 400
+    store.update_settings({"github_token": token})
+    return jsonify({"ok": True})
+
+
+@app.route("/api/update/version", methods=["GET"])
+@login_required()
+def api_update_version():
+    return jsonify({"ok": True, "version": updater.current_version()})
 
 
 def main():

@@ -938,6 +938,77 @@ $('#apply-btn')?.addEventListener('click', async () => {
   toast(data.message || (ok ? 'Riavvio in corso…' : 'Errore'), ok ? 'ok' : 'err');
 });
 
+// ── OTA Update ────────────────────────────────────────────────────────────
+async function loadCurrentVersion() {
+  const { ok, data } = await api('/api/update/version');
+  if (ok) {
+    const v = data.version || '?';
+    const el = $('#update-current-ver'); if (el) el.textContent = 'v' + v;
+    const about = $('#about-version'); if (about) about.textContent = 'v' + v;
+  }
+}
+
+$('#update-check-btn')?.addEventListener('click', async () => {
+  const btn = $('#update-check-btn');
+  btn.disabled = true; btn.textContent = '⏳ Controllo…';
+  const errEl = $('#update-error-box');
+  errEl.style.display = 'none';
+
+  const { ok, data } = await api('/api/update/check');
+  btn.disabled = false; btn.textContent = '🔍 Controlla aggiornamenti';
+
+  if (!ok) {
+    errEl.textContent = data.error || data.message || 'Errore';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  $('#update-uptodate-box').classList.toggle('hidden', data.available);
+  $('#update-available-box').classList.toggle('hidden', !data.available);
+  $('#update-apply-btn').classList.toggle('hidden', !data.available);
+
+  if (data.available) {
+    $('#update-latest-ver').textContent = 'v' + data.latest_version;
+    $('#update-release-notes').textContent = data.release_notes || '';
+  }
+});
+
+$('#update-apply-btn')?.addEventListener('click', async () => {
+  if (!confirm('Vuoi installare l\'aggiornamento? Il viewer e il portale verranno riavviati.')) return;
+  const btn = $('#update-apply-btn');
+  btn.disabled = true; btn.textContent = '⏳ Aggiornamento in corso…';
+
+  const { ok, data } = await api('/api/update/apply', { method: 'POST' });
+  if (ok || data.message === 'Errore di rete') {
+    toast(ok ? (data.message || 'Aggiornamento completato') : 'Aggiornamento in corso, il portale si riavvierà…', 'ok');
+    _waitForPortal();
+  } else {
+    toast(data.message || data.error || 'Errore aggiornamento', 'err');
+    btn.disabled = false; btn.textContent = '⬇ Installa aggiornamento';
+  }
+});
+
+async function _waitForPortal(maxMs = 30000) {
+  const start = Date.now();
+  while (Date.now() - start < maxMs) {
+    try {
+      const r = await fetch('/api/update/version', { signal: AbortSignal.timeout(2000) });
+      if (r.ok) { window.location.reload(); return; }
+    } catch {}
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  window.location.reload();
+}
+
+$('#update-token-save')?.addEventListener('click', async () => {
+  const token = $('#update-token-input').value.trim();
+  if (!token) { toast('Token vuoto', 'err'); return; }
+  const { ok } = await api('/api/update/token', {
+    method: 'POST', body: JSON.stringify({ token })
+  });
+  toast(ok ? 'Token salvato' : 'Errore', ok ? 'ok' : 'err');
+});
+
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
   const ok = await initAuth();
@@ -990,6 +1061,7 @@ $('#apply-btn')?.addEventListener('click', async () => {
     loadWallpaper(),
     loadUsers(),
     loadLicenseStatus(),
+    loadCurrentVersion(),
   ]);
 
   // Poll status every 30s

@@ -4,7 +4,16 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLa
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 
-APP_VERSION = "1.0.0"
+
+def _read_version() -> str:
+    for p in [Path(__file__).resolve().parent.parent / "VERSION",
+              Path(sys.argv[0]).resolve().parent / "VERSION"]:
+        if p.exists():
+            return p.read_text().strip()
+    return "0.0.0"
+
+
+APP_VERSION = _read_version()
 
 _STYLE = """
     QDialog { background: #1e1e1e; color: #ddd; }
