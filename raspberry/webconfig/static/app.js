@@ -1000,15 +1000,6 @@ async function _waitForPortal(maxMs = 30000) {
   window.location.reload();
 }
 
-$('#update-token-save')?.addEventListener('click', async () => {
-  const token = $('#update-token-input').value.trim();
-  if (!token) { toast('Token vuoto', 'err'); return; }
-  const { ok } = await api('/api/update/token', {
-    method: 'POST', body: JSON.stringify({ token })
-  });
-  toast(ok ? 'Token salvato' : 'Errore', ok ? 'ok' : 'err');
-});
-
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
   const ok = await initAuth();
