@@ -54,6 +54,9 @@ def _mpv_command(url: str, wid: int, passphrase: str = "", hw_decode: bool = Fal
         "--framedrop=decoder+vo",  # drop late frames at decode AND VO stage
         "--cache=no",              # no local buffer: play live edge only
         "--demuxer-readahead-secs=0",
+        "--demuxer-lavf-o=fflags=+nobuffer",
+        "--demuxer-max-bytes=512KiB",
+        "--demuxer-max-back-bytes=0",
         "--vd-lavc-threads=1",
         "--network-timeout=10",
         # auto-reconnect on stream drop
@@ -148,10 +151,8 @@ class CameraWidget(QWidget):
         self._watchdog.setInterval(2000)
         self._watchdog.timeout.connect(self._check_process)
 
-        # Periodic live-edge resync: restart mpv every 20 min to clear
-        # accumulated network buffer lag. Brief reconnect (~1.5s), transparent
-        # to the user. TCP buffering causes visible lag if left running for hours.
-        _LAG_RESET_MS = 20 * 60 * 1000  # 20 minutes
+        # Periodic live-edge resync: restart mpv to clear accumulated TCP lag.
+        _LAG_RESET_MS = 5 * 60 * 1000  # 5 minutes
         self._lag_reset_timer = QTimer(self)
         self._lag_reset_timer.setInterval(_LAG_RESET_MS)
         self._lag_reset_timer.timeout.connect(self._resync_live_edge)
