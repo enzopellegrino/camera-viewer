@@ -310,14 +310,14 @@ function renderCamPicker(selected) {
   box.innerHTML = _cameras.map(c => {
     const checked = selected.includes(c.id);
     return `
-    <label class="cam-pick-item ${checked ? 'selected' : ''}" onclick="toggleCamPick(this,'${c.id}')">
-      <input type="checkbox" ${checked ? 'checked' : ''} data-cam-id="${c.id}" onclick="event.stopPropagation()"/>
+    <div class="cam-pick-item ${checked ? 'selected' : ''}" onclick="toggleCamPick(this)">
+      <input type="checkbox" ${checked ? 'checked' : ''} data-cam-id="${c.id}" style="pointer-events:none"/>
       <span>${esc(c.name)}</span>
-    </label>`;
+    </div>`;
   }).join('');
 }
 
-window.toggleCamPick = (el, id) => {
+window.toggleCamPick = (el) => {
   const cb = el.querySelector('input');
   cb.checked = !cb.checked;
   el.classList.toggle('selected', cb.checked);

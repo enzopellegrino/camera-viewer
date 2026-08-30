@@ -106,12 +106,54 @@ class GridWidget(QWidget):
     def exit_single_cam(self):
         self._exit_single_cam_internal()
 
+    def next_single_cam(self) -> bool:
+        """Zoom sulla telecamera successiva (ciclico). Ritorna True se eseguito."""
+        if not self._widgets or self._single is None:
+            return False
+        idx = (self._widgets.index(self._single) + 1) % len(self._widgets)
+        self._swap_single_cam(self._widgets[idx])
+        return True
+
+    def prev_single_cam(self) -> bool:
+        """Zoom sulla telecamera precedente (ciclico). Ritorna True se eseguito."""
+        if not self._widgets or self._single is None:
+            return False
+        idx = (self._widgets.index(self._single) - 1) % len(self._widgets)
+        self._swap_single_cam(self._widgets[idx])
+        return True
+
+    def _swap_single_cam(self, target: "CameraWidget"):
+        """Sostituisce la cam in zoom con target senza tornare alla griglia (niente flash)."""
+        prev = self._single
+
+        # Rimette prev nel layout senza mostrarla (resta coperta da target)
+        prev_idx = self._widgets.index(prev)
+        self._grid.addWidget(prev, prev_idx // self._cols, prev_idx % self._cols)
+        prev._hw_decode = False
+        prev.reset_video_zoom()  # reset zoom quando si lascia la cam
+
+        # Porta target in fullscreen direttamente
+        self._single = target
+        self._grid.removeWidget(target)
+        target.setGeometry(0, 0, self.width(), self.height())
+        target.raise_()
+        target.show()
+
+        if os.environ.get("CV_HWDEC_BACKEND") != "vaapi":
+            # Pi: ferma prev, riavvia target in hw decode
+            prev.stop()
+            prev.hide()
+            target._hw_decode = True
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(500, target._start_stream)
+
     def _exit_single_cam_internal(self):
         if self._single is None:
             return
         target = self._single
         self._single = None
         target._hw_decode = False
+        target.reset_video_zoom()  # reset zoom/pan prima di tornare alla griglia
         idx = self._widgets.index(target)
         row = idx // self._cols
         col = idx % self._cols

@@ -331,8 +331,18 @@ class MainWindow(QMainWindow):
 
         root = QWidget()
         root.setMouseTracking(True)
+        root.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.setMouseTracking(True)
         self.setCentralWidget(root)
+        self._touch_start_x: float | None = None
+        self._touch_start_y: float | None = None
+        self._touch_is_swipe: bool = False   # True solo se il dito si è mosso intenzionalmente
+        self._pinch_start_dist: float | None = None
+        self._pinch_start_zoom: float = 0.0
+        self._pinch_start_pan_x: float = 0.0
+        self._pinch_start_pan_y: float = 0.0
+        self._pinch_center_x: float = 0.0   # punto medio pinch, norm. [-0.5, 0.5]
+        self._pinch_center_y: float = 0.0
         self._root_vbox = QVBoxLayout(root)
         self._root_vbox.setContentsMargins(0, 0, 0, 0)
         self._root_vbox.setSpacing(0)
@@ -491,17 +501,25 @@ class MainWindow(QMainWindow):
         self._switcher.set_active(self._current_idx)
 
     def _prev_screen(self):
-        n = len(self.config.screens)
-        if n <= 1:
+        # In single-cam mode: telecamera precedente nella stessa vista
+        if self._single_cam_mode and self._grid:
+            self._grid.prev_single_cam()
             return
-        self._load_screen((self._current_idx - 1) % n)
+        n = len(self.config.screens)
+        if n <= 1 or self._current_idx <= 0:
+            return   # già alla prima vista, non ciclare
+        self._load_screen(self._current_idx - 1)
         self._switcher.expand_temporarily()
 
     def _next_screen(self):
-        n = len(self.config.screens)
-        if n <= 1:
+        # In single-cam mode: telecamera successiva nella stessa vista
+        if self._single_cam_mode and self._grid:
+            self._grid.next_single_cam()
             return
-        self._load_screen((self._current_idx + 1) % n)
+        n = len(self.config.screens)
+        if n <= 1 or self._current_idx >= n - 1:
+            return   # già all'ultima vista, non ciclare
+        self._load_screen(self._current_idx + 1)
         self._switcher.expand_temporarily()
 
     def _refresh_switcher(self):
@@ -582,6 +600,10 @@ class MainWindow(QMainWindow):
     def _enter_single_cam(self, widget):
         self._single_cam_mode = True
         self._grid.enter_single_cam(widget)
+        # Annulla il rilevamento swipe: il tap che ha aperto la cam
+        # non deve essere interpretato come swipe al TouchEnd.
+        self._touch_start_x = None
+        self._pinch_start_dist = None
         if self._toolbar:
             self._toolbar.hide()
 
@@ -629,15 +651,110 @@ class MainWindow(QMainWindow):
     # ── Mouse / resize (scene switcher) ──────────────────────────────────────
 
     def eventFilter(self, obj, event):
-        """Cattura rotella del mouse da qualsiasi widget → cambia vista."""
+        """Cattura rotella del mouse e swipe touch → cambia vista."""
         from PySide6.QtCore import QEvent
-        if event.type() == QEvent.Wheel and len(self.config.screens) > 1:
+        et = event.type()
+
+        # ── Rotella del mouse ─────────────────────────────────────────────────
+        if et == QEvent.Wheel and len(self.config.screens) > 1:
             delta = event.angleDelta().y()
             if delta > 0:
                 self._prev_screen()
             elif delta < 0:
                 self._next_screen()
-            return True   # evento consumato, non fa scroll su altro
+            return True   # evento consumato
+
+        # ── Touch: pinch (2 dita) e swipe (1 dito) ───────────────────────────
+        if et == QEvent.TouchBegin:
+            pts = event.points()
+            # TouchBegin arriva sempre con 1 sola dita — registra solo lo swipe start.
+            # Il secondo dito arriva nel primo TouchUpdate con len(pts)==2.
+            self._pinch_start_dist = None
+            self._touch_is_swipe = False
+            if pts:
+                self._touch_start_x = pts[0].position().x()
+                self._touch_start_y = pts[0].position().y()
+            return False
+
+        if et == QEvent.TouchUpdate:
+            pts = event.points()
+            cam = self._grid._single if (self._grid and self._single_cam_mode) else None
+            if len(pts) >= 2:
+                mx = (pts[0].position().x() + pts[1].position().x()) / 2
+                my = (pts[0].position().y() + pts[1].position().y()) / 2
+
+                if self._pinch_start_dist is None:
+                    # Secondo dito appena aggiunto: inizializza pinch
+                    self._pinch_start_dist = self._touch_dist(pts[0], pts[1])
+                    self._pinch_start_zoom = cam._video_zoom if cam else 0.0
+                    self._pinch_start_pan_x = cam._video_pan_x if cam else 0.0
+                    self._pinch_start_pan_y = cam._video_pan_y if cam else 0.0
+                    self._pinch_center_x = mx
+                    self._pinch_center_y = my
+                    self._touch_start_x = None   # annulla swipe
+                else:
+                    dist = self._touch_dist(pts[0], pts[1])
+                    if self._pinch_start_dist > 0:
+                        import math
+                        scale = dist / self._pinch_start_dist
+
+                        if not self._single_cam_mode:
+                            # Griglia: entra in single-cam quando pinch supera soglia
+                            if scale > 1.3:
+                                target = self._cam_widget_at(mx, my)
+                                if target:
+                                    self._enter_single_cam(target)
+                                    cam = target
+                                    # Inizializza zoom/pan dal punto corrente
+                                    self._pinch_start_zoom = 0.0
+                                    self._pinch_start_pan_x = 0.0
+                                    self._pinch_start_pan_y = 0.0
+                                    self._pinch_start_dist = dist
+                        else:
+                            # Single-cam: zoom + pan centrato sul punto di pizzico
+                            if cam:
+                                new_zoom = self._pinch_start_zoom + math.log2(max(scale, 0.01))
+                                new_zoom = max(-1.0, min(4.0, new_zoom))
+                                s = 2 ** (new_zoom - self._pinch_start_zoom)
+                                w = max(cam.width(), 1)
+                                h = max(cam.height(), 1)
+                                cx = self._pinch_center_x / w - 0.5
+                                cy = self._pinch_center_y / h - 0.5
+                                pan_x = cx - (cx - self._pinch_start_pan_x) * s
+                                pan_y = cy - (cy - self._pinch_start_pan_y) * s
+                                cam.set_video_zoom(new_zoom, pan_x, pan_y)
+            elif len(pts) == 1 and self._touch_start_x is not None:
+                dx = pts[0].position().x() - self._touch_start_x
+                dy = pts[0].position().y() - (self._touch_start_y or 0)
+                # Marca come swipe solo se il dito si muove orizzontalmente in modo intenzionale
+                if abs(dx) > 60 and abs(dx) > abs(dy) * 2.5:
+                    self._touch_is_swipe = True
+                if self._touch_is_swipe and len(self.config.screens) > 1:
+                    self._switcher.expand_temporarily()
+            return False
+
+        if et == QEvent.TouchEnd:
+            self._pinch_start_dist = None
+            # Swipe valido solo se il flag è stato impostato durante TouchUpdate
+            # (movimento orizzontale intenzionale rilevato in tempo reale).
+            # Un tap non imposta mai _touch_is_swipe → nessun cambio vista accidentale.
+            if self._touch_is_swipe and len(self.config.screens) > 1:
+                pts = event.points()
+                if pts and self._touch_start_x is not None:
+                    delta_x = pts[0].position().x() - self._touch_start_x
+                    if delta_x < 0:
+                        self._next_screen()
+                    else:
+                        self._prev_screen()
+                    self._touch_start_x = None
+                    self._touch_start_y = None
+                    self._touch_is_swipe = False
+                    return True
+            self._touch_start_x = None
+            self._touch_start_y = None
+            self._touch_is_swipe = False
+            return False
+
         return False
 
     def mouseMoveEvent(self, event):
@@ -678,7 +795,10 @@ class MainWindow(QMainWindow):
 
     def _enter_kiosk(self):
         self.showFullScreen()
-        self.setCursor(Qt.BlankCursor)
+        # Nasconde il cursore a livello di QApplication — sovrascrive qualsiasi
+        # widget figlio e non viene resettato dagli eventi touch sintetici su X11.
+        from PySide6.QtWidgets import QApplication as _QApp
+        _QApp.setOverrideCursor(Qt.BlankCursor)
         if self._toolbar:
             self._toolbar.hide()
         self._load_screen(self._current_idx)
@@ -714,6 +834,38 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
     # ----------------------------------------------------------- helpers
+
+    def _cam_widget_at(self, x: float, y: float):
+        """Ritorna il CameraWidget sotto il punto (x,y) in coordinate del widget root."""
+        from PySide6.QtWidgets import QApplication
+        from .camera_widget import CameraWidget
+        root = self.centralWidget()
+        if root is None:
+            return None
+        global_pos = root.mapToGlobal(root.rect().topLeft())
+        # Converti in coordinate globali
+        from PySide6.QtCore import QPoint
+        gx = int(global_pos.x() + x)
+        gy = int(global_pos.y() + y)
+        widget = QApplication.widgetAt(gx, gy)
+        # Risali finché non troviamo un CameraWidget
+        while widget is not None:
+            if isinstance(widget, CameraWidget):
+                return widget
+            widget = widget.parent()
+        # Fallback: cerca nella lista dei widget del grid
+        if self._grid:
+            for w in self._grid._widgets:
+                if w.geometry().contains(int(x), int(y)):
+                    return w
+        return None
+
+    @staticmethod
+    def _touch_dist(p1, p2) -> float:
+        """Distanza euclidea tra due QEventPoint."""
+        dx = p1.position().x() - p2.position().x()
+        dy = p1.position().y() - p2.position().y()
+        return (dx * dx + dy * dy) ** 0.5
 
     @staticmethod
     def _is_raspberry_pi() -> bool:
