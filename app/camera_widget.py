@@ -52,9 +52,12 @@ def _mpv_command(url: str, wid: int, ipc_path: str, passphrase: str = "", hw_dec
         "--profile=low-latency",   # sets cache=no, readahead=0, sync=audio
         "--untimed",               # ignore PTS, render immediately
         "--video-sync=desync",     # no clock sync (no audio reference)
-        "--framedrop=vo",          # drop late frames, never slow down
+        "--framedrop=decoder+vo",  # drop late frames at decode AND VO stage
         "--cache=no",              # no local buffer: play live edge only
         "--demuxer-readahead-secs=0",
+        "--demuxer-lavf-o=fflags=+nobuffer",
+        "--demuxer-max-bytes=512KiB",
+        "--demuxer-max-back-bytes=0",
         "--vd-lavc-threads=1",
         "--network-timeout=10",
         # auto-reconnect on stream drop
@@ -154,6 +157,12 @@ class CameraWidget(QWidget):
         self._watchdog.setInterval(2000)
         self._watchdog.timeout.connect(self._check_process)
 
+        # Periodic live-edge resync: restart mpv to clear accumulated TCP lag.
+        _LAG_RESET_MS = 5 * 60 * 1000  # 5 minutes
+        self._lag_reset_timer = QTimer(self)
+        self._lag_reset_timer.setInterval(_LAG_RESET_MS)
+        self._lag_reset_timer.timeout.connect(self._resync_live_edge)
+
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def showEvent(self, event):
@@ -226,6 +235,18 @@ class CameraWidget(QWidget):
         QTimer.singleShot(1500, self._status_label.hide)
         QTimer.singleShot(1500, self._hide_placeholder)
         self._watchdog.start()
+        self._lag_reset_timer.start()
+
+    def _resync_live_edge(self):
+        """Kill and restart mpv to clear accumulated network buffer lag.
+
+        Called every 20 minutes. mpv accumulates TCP buffer delay over hours
+        even with --cache=no; restarting resets the live edge instantly.
+        The reconnect takes ~1.5s (same as a normal stream reconnect).
+        Does nothing if the stream is currently stopped (e.g. widget hidden).
+        """
+        if self._proc is not None:
+            self._start_stream()
 
     def _check_process(self):
         """Restart mpv if it exited (stream dropped / network error)."""
@@ -308,15 +329,18 @@ class CameraWidget(QWidget):
     def request_stop(self):
         self._reconnect_timer.stop()
         self._watchdog.stop()
+        self._lag_reset_timer.stop()
         self._kill_proc()
 
     def wait_stop(self):
         self._reconnect_timer.stop()
+        self._lag_reset_timer.stop()
         self._kill_proc()
 
     def stop(self):
         self._reconnect_timer.stop()
         self._watchdog.stop()
+        self._lag_reset_timer.stop()
         self._kill_proc()
 
     # ── Qt events ─────────────────────────────────────────────────────────────

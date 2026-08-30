@@ -48,99 +48,123 @@ cd "${_KIOSK_HOME}/camera-viewer" || exit 0
 PYTHON3="python3"
 [ -x ".venv/bin/python3" ] && PYTHON3=".venv/bin/python3"
 
-# ── Mostra IP del portale su schermo al boot ────────────────────────────────
-# Aspetta max 15s che la rete sia disponibile, poi mostra l'IP con xterm/OSD.
-# Si chiude automaticamente dopo 10s o quando l'utente configura telecamere.
-_show_ip_overlay() {
-    local ip timeout=15
-    for i in $(seq 1 $timeout); do
-        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-        [ -n "$ip" ] && break
-        sleep 1
-    done
+# ── Modalità provisioning: schermata permanente con IP / hotspot ─────────────
+#
+# Viene eseguita in background finché non vengono configurate telecamere.
+# NON sparisce mai: aggiorna le info ogni 15s. Il loop principale monitora
+# config.json; appena compaiono telecamere, pkill termina xterm e il loop esce.
+#
+# Usa xsetroot per sfondo scuro (no schermo nero puro durante i refresh).
+_run_provisioning() {
+    # Sfondo scuro fisso — visibile anche tra un refresh e l'altro
+    xsetroot -solid "#0c0e18" 2>/dev/null || true
 
-    # Controlla se siamo in modalità AP (nessun ethernet, hotspot attivo)
-    local ap_mode=""
-    if [ -f /tmp/cv-ap-mode ]; then
-        ap_mode=$(cat /tmp/cv-ap-mode)  # formato: SSID|IP
-    fi
+    local XTERM_PID=""
 
-    local content
-    if [ -n "$ap_mode" ]; then
-        # Modalità hotspot WiFi
-        local ssid="${ap_mode%%|*}"
-        local ap_ip="${ap_mode##*|}"
-        # Non mostrare la password AP a schermo: è nel file /etc/cv-ap-psk (root-only).
-        # L'installatore deve recuperarla tramite SSH o etichetta fisica.
-        content="echo ''
-echo '  ╔═══════════════════════════════════════════╗'
-echo '  ║   🎥  Camera Viewer v2.7                  ║'
-echo '  ╠═══════════════════════════════════════════╣'
-echo '  ║  📡 Nessun ethernet — Hotspot WiFi attivo  ║'
-echo '  ║                                           ║'
-echo '  ║   1. Connettiti al WiFi: ${ssid}       ║'
-echo '  ║      (password: vedi etichetta NUC)       ║'
-echo '  ║   2. Apri:  http://${ap_ip}          ║'
-echo '  ║   3. Login: admin / admin                 ║'
-echo '  ╚═══════════════════════════════════════════╝'
-sleep 60"
-    elif [ -n "$ip" ]; then
-        # Modalità ethernet normale
-        content="echo ''
-echo '  ╔═══════════════════════════════════════════╗'
-echo '  ║   🎥  Camera Viewer v2.7                  ║'
-echo '  ║       di Enzo Pellegrino                  ║'
-echo '  ╠═══════════════════════════════════════════╣'
-echo '  ║   Portale:  http://${ip}          ║'
-echo '  ║   Login:    admin / admin                 ║'
-echo '  ╚═══════════════════════════════════════════╝'
-echo ''
-echo '  (si chiude in 10 secondi...)'
-sleep 10"
-    else
-        # Nessuna rete dopo 15s: mostra comunque un messaggio di stato
+    _refresh_overlay() {
+        local ip="" ap_mode="" content
+
+        # Aspetta max 15s per l'IP
+        for i in $(seq 1 15); do
+            ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            [ -n "$ip" ] && break
+            sleep 1
+        done
+
+        [ -f /tmp/cv-ap-mode ] && ap_mode=$(cat /tmp/cv-ap-mode)
+
+        if [ -n "$ap_mode" ]; then
+            local ssid="${ap_mode%%|*}"
+            local ap_ip="${ap_mode##*|}"
+            content="while true; do clear
+printf '\n'
+printf '  ╔═══════════════════════════════════════════╗\n'
+printf '  ║   \U0001F4F7  Camera Viewer                      ║\n'
+printf '  ╠═══════════════════════════════════════════╣\n'
+printf '  ║  Nessun ethernet — Hotspot WiFi attivo    ║\n'
+printf '  ║                                           ║\n'
+printf '  ║  1. Connettiti al WiFi: %-18s║\n' '${ssid}'
+printf '  ║     (password: vedi etichetta dispositivo)║\n'
+printf '  ║  2. Apri:  http://%-24s║\n' '${ap_ip}'
+printf '  ║  3. Login: admin / admin                  ║\n'
+printf '  ╚═══════════════════════════════════════════╝\n'
+sleep 15; done"
+        elif [ -n "$ip" ]; then
+            content="while true; do clear
+printf '\n'
+printf '  ╔═══════════════════════════════════════════╗\n'
+printf '  ║   \U0001F4F7  Camera Viewer — Pronto!           ║\n'
+printf '  ╠═══════════════════════════════════════════╣\n'
+printf '  ║                                           ║\n'
+printf '  ║  Apri dal browser del telefono / PC:      ║\n'
+printf '  ║    http://%-32s║\n' '${ip}'
+printf '  ║                                           ║\n'
+printf '  ║  Login:   admin / admin                   ║\n'
+printf '  ║  ⚠  Cambia la password al primo accesso! ║\n'
+printf '  ║                                           ║\n'
+printf '  ╚═══════════════════════════════════════════╝\n'
+sleep 15; done"
+        else
+            content="while true; do clear
+printf '\n'
+printf '  ╔═══════════════════════════════════════════╗\n'
+printf '  ║   \U0001F4F7  Camera Viewer                      ║\n'
+printf '  ╠═══════════════════════════════════════════╣\n'
+printf '  ║   Attesa connessione di rete...           ║\n'
+printf '  ║   Collega un cavo ethernet e attendi.     ║\n'
+printf '  ╚═══════════════════════════════════════════╝\n'
+sleep 5; done"
+        fi
+
+        # Termina il vecchio xterm e avvia il nuovo con info aggiornate
+        [ -n "$XTERM_PID" ] && kill "$XTERM_PID" 2>/dev/null || true
         xterm -T "Camera Viewer" \
-              -fa "Monospace" -fs 16 \
-              -bg "#0c0e18" -fg "#f7a74f" \
-              -geometry 55x8+0+0 \
-              -e bash -c "echo ''
-echo '  ╔═══════════════════════════════════════════╗'
-echo '  ║   🎥  Camera Viewer v2.7                  ║'
-echo '  ╠═══════════════════════════════════════════╣'
-echo '  ║   ⚠  Nessuna rete rilevata               ║'
-echo '  ║   Collega un cavo ethernet e riavvia      ║'
-echo '  ╚═══════════════════════════════════════════╝'
-sleep 60" &
-        return
-    fi
+              -fa "Monospace" -fs 18 \
+              -bg "#0c0e18" -fg "#4f72f7" \
+              -geometry 55x12+0+0 \
+              +sb \
+              -e bash -c "$content" &
+        XTERM_PID=$!
+    }
 
-    xterm -T "Camera Viewer" \
-          -fa "Monospace" -fs 16 \
-          -bg "#0c0e18" -fg "#4f72f7" \
-          -geometry 55x10+0+0 \
-          -e bash -c "$content" &
+    _refresh_overlay
+
+    # Loop: aggiorna ogni 30s e controlla se le telecamere sono state configurate
+    while true; do
+        sleep 30
+        # Esce non appena vengono configurate telecamere
+        if $PYTHON3 -c "
+import json, sys
+try:
+    cfg = json.load(open('$CFG_DIR/config.json'))
+    sys.exit(0 if cfg.get('cameras') else 1)
+except:
+    sys.exit(1)
+" 2>/dev/null; then
+            [ -n "$XTERM_PID" ] && kill "$XTERM_PID" 2>/dev/null || true
+            break
+        fi
+        _refresh_overlay
+    done
 }
 
-# Mostra l'IP solo se non ci sono ancora telecamere configurate
-if ! $PYTHON3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG_DIR/config.json')).get('cameras') else 1)" 2>/dev/null; then
-    _show_ip_overlay
-fi
-
-# Supervisor loop:
-#  - Provisioning (no telecamere): aspetta in loop finché non vengono configurate.
-#    La sessione openbox resta viva; il portale web (camera-webconfig) è già in
-#    ascolto; l'overlay hotspot/IP viene rimostrato ogni ~60s per evitare schermo nero.
+# ── Supervisor loop ───────────────────────────────────────────────────────────
+#  - Provisioning (no telecamere): mostra schermata IP/hotspot permanente.
 #  - Operativo (telecamere presenti): avvia main.py e riavvia se crasha.
-_OVERLAY_TICK=0
 while true; do
   [ -f "$CFG_DIR/force-setup" ] && break
 
-  if ! $PYTHON3 -c "import json,sys; sys.exit(0 if json.load(open('$CFG_DIR/config.json')).get('cameras') else 1)" 2>/dev/null; then
-    # Nessuna telecamera ancora: siamo in provisioning.
-    # Rimostra l'overlay ogni 60s per evitare schermo nero indefinito.
-    _OVERLAY_TICK=$(( _OVERLAY_TICK + 1 ))
-    [ $(( _OVERLAY_TICK % 6 )) -eq 0 ] && _show_ip_overlay
-    sleep 10
+  if ! $PYTHON3 -c "
+import json, sys
+try:
+    cfg = json.load(open('$CFG_DIR/config.json'))
+    sys.exit(0 if cfg.get('cameras') else 1)
+except:
+    sys.exit(1)
+" 2>/dev/null; then
+    # Modalità provisioning — schermata permanente.
+    # _run_provisioning blocca finché non vengono configurate telecamere.
+    _run_provisioning
     continue
   fi
 
