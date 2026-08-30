@@ -16,8 +16,8 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 _log = logging.getLogger(__name__)
-_REPO = "enzopellegrino/camera-viewer"
-_API = f"https://api.github.com/repos/{_REPO}/releases/latest"
+_RELEASES_REPO = "enzopellegrino/camera-viewer-releases"
+_API = f"https://api.github.com/repos/{_RELEASES_REPO}/releases/latest"
 _APP_DIR = Path.home() / "camera-viewer"
 _BACKUP_DIR = Path.home() / "camera-viewer.bak"
 _LOCK_FILE = Path.home() / ".camera-viewer-update.lock"
@@ -38,13 +38,9 @@ def _version_tuple(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in v.lstrip("v").split(".") if x.isdigit())
 
 
-def check_update(token: str) -> dict:
-    """Return latest release info from GitHub. Requires a PAT for private repos."""
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+def check_update() -> dict:
+    """Return latest release info from the public releases repo (no auth)."""
+    headers = {"Accept": "application/vnd.github+json"}
     req = Request(_API, headers=headers)
     try:
         with urlopen(req, timeout=15) as resp:
@@ -54,6 +50,14 @@ def check_update(token: str) -> dict:
 
     latest = data.get("tag_name", "").lstrip("v")
     current = current_version()
+
+    # Find the .tar.gz asset attached to the release
+    asset_url = ""
+    for asset in data.get("assets", []):
+        if asset.get("name", "").endswith(".tar.gz"):
+            asset_url = asset.get("browser_download_url", "")
+            break
+
     return {
         "available": _version_tuple(latest) > _version_tuple(current),
         "current_version": current,
@@ -61,11 +65,11 @@ def check_update(token: str) -> dict:
         "release_name": data.get("name", ""),
         "release_notes": data.get("body", ""),
         "published_at": data.get("published_at", ""),
-        "tarball_url": data.get("tarball_url", ""),
+        "tarball_url": asset_url,
     }
 
 
-def apply_update(token: str) -> tuple[bool, str]:
+def apply_update() -> tuple[bool, str]:
     """Download latest release tarball, backup current app, extract, restart."""
     lock_fd = open(_LOCK_FILE, "w")
     try:
@@ -75,14 +79,14 @@ def apply_update(token: str) -> tuple[bool, str]:
         return False, "Aggiornamento già in corso"
 
     try:
-        return _do_update(token)
+        return _do_update()
     finally:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         lock_fd.close()
 
 
-def _do_update(token: str) -> tuple[bool, str]:
-    info = check_update(token)
+def _do_update() -> tuple[bool, str]:
+    info = check_update()
     if not info.get("available"):
         return False, "Nessun aggiornamento disponibile"
 
@@ -94,20 +98,13 @@ def _do_update(token: str) -> tuple[bool, str]:
     if parsed.scheme != "https" or not (parsed.hostname or "").endswith("github.com"):
         return False, "URL tarball non valido"
 
-    # Pre-flight disk space check (need ~200 MB for download + backup + extract)
     stat = shutil.disk_usage(_APP_DIR.parent)
     if stat.free < 200 * 1024 * 1024:
         return False, "Spazio su disco insufficiente (servono almeno 200 MB)"
 
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
     tmp_tar = None
     try:
-        req = Request(tarball_url, headers=headers)
+        req = Request(tarball_url)
         with urlopen(req, timeout=120) as resp:
             tmp_tar = tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False)
             shutil.copyfileobj(resp, tmp_tar)

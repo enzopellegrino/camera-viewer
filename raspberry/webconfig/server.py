@@ -951,10 +951,7 @@ def api_license_set():
 @app.route("/api/update/check", methods=["GET"])
 @login_required(admin=True)
 def api_update_check():
-    token = store.get_settings().get("github_token", "")
-    if not token:
-        return jsonify({"ok": False, "error": "Token GitHub non configurato"}), 400
-    info = updater.check_update(token)
+    info = updater.check_update()
     if "error" in info:
         return jsonify({"ok": False, "error": info["error"]}), 502
     return jsonify({"ok": True, **info})
@@ -963,22 +960,8 @@ def api_update_check():
 @app.route("/api/update/apply", methods=["POST"])
 @login_required(admin=True)
 def api_update_apply():
-    token = store.get_settings().get("github_token", "")
-    if not token:
-        return jsonify({"ok": False, "error": "Token GitHub non configurato"}), 400
-    ok, msg = updater.apply_update(token)
+    ok, msg = updater.apply_update()
     return jsonify({"ok": ok, "message": msg}), (200 if ok else 500)
-
-
-@app.route("/api/update/token", methods=["POST"])
-@login_required(admin=True)
-def api_update_token_set():
-    data = request.get_json(force=True, silent=True) or {}
-    token = (data.get("token") or "").strip()
-    if not token:
-        return jsonify({"ok": False, "message": "Token vuoto"}), 400
-    store.update_settings({"github_token": token})
-    return jsonify({"ok": True})
 
 
 @app.route("/api/update/version", methods=["GET"])
