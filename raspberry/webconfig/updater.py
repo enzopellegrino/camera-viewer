@@ -162,12 +162,11 @@ def _rollback():
 
 def _restart_services():
     """Restart viewer and schedule portal restart."""
-    # Kill viewer — supervisor loop relaunches it
     subprocess.run(["pkill", "-f", "python3 main.py"], check=False)
-    # Restart the webconfig service (systemd) after a short delay so the
-    # HTTP response can be sent before the process dies.
+    # Kill ourselves after a short delay so the HTTP response is sent first.
+    # systemd Restart=always will relaunch the portal with the new code.
     subprocess.Popen(
-        ["bash", "-c", "sleep 2 && sudo -n systemctl restart camera-webconfig.service"],
+        ["bash", "-c", f"sleep 2 && kill {os.getpid()}"],
         start_new_session=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
